@@ -14,6 +14,7 @@ def extract_video(h5_path, output_dir, camera="hama1"):
     stem = f"{h5_path.stem}_{camera}"
     video_path = output_dir / f"{stem}.mp4"
 
+    'Extracting video from .h5 file to .mp4'
     with h5py.File(h5_path, "r") as f:
 
         video_data = f[camera][()]
