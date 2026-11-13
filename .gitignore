@@ -218,3 +218,12 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+appunti.txt
+
+output*/
+
+data*/
+
+*/yolo11n.pt
+yolo11n.pt
