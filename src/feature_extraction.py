@@ -11,33 +11,35 @@ from torchvision.models.video import (
 class VideoFeatureExtractor:
 
     def __init__(self, device=None):
+        '''
+        Load the pretrained R(2+1)D-18 encoder and freeze its weights.
+        '''
 
         self.device = device or (
             "cuda" if torch.cuda.is_available()
             else "cpu"
         )
 
-        weights = R2Plus1D_18_Weights.DEFAULT
+        weights = R2Plus1D_18_Weights.KINETICS400_V1
 
         self.preprocess = weights.transforms()
 
         self.model = r2plus1d_18(weights=weights)
 
-        # Rimuove il classificatore Kinetics-400
+        # Remove the Kinetics-400 classification layer.
         self.model.fc = nn.Identity()
 
         self.model = self.model.to(self.device)
         self.model.eval()
 
-        # Encoder congelato
+        # Disable gradient updates for the encoder.
         self.model.requires_grad_(False)
 
-    '''
-    Function used to transform frames in tensors, applies preprocessing 
-    phase and passed the clip to R(2+1)D.
-    '''
     @torch.inference_mode()
     def extract(self, frames):
+        '''
+        Convert BGR frames to RGB and return a 512-dimensional NumPy embedding.
+        '''
 
         rgb_frames = [
             cv2.cvtColor(f, cv2.COLOR_BGR2RGB)
@@ -52,7 +54,7 @@ class VideoFeatureExtractor:
             0, 3, 1, 2
         )
 
-        # Preprocessing ufficiale dei pesi
+        # Apply the preprocessing supplied with the pretrained weights.
         video = self.preprocess(video)
 
         # B, C, T, H, W

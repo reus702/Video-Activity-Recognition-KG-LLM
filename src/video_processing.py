@@ -1,10 +1,15 @@
 import cv2
 import numpy as np
 
-'''
-Function used to process a video in temporal windows, windows containes multiple frames.
-'''
 def iter_clips( video_path, window_sec=3.0, stride_sec=1.5, num_frames=16 ):
+    '''
+    Yield sampled BGR frames from sliding windows with relative video times.
+    Window end times are exclusive; incomplete trailing windows are omitted.
+    '''
+    if (not np.isfinite([window_sec, stride_sec]).all()
+            or window_sec <= 0 or stride_sec <= 0
+            or not isinstance(num_frames, int) or num_frames < 1):
+        raise ValueError("Invalid clip sampling parameters")
     cap = cv2.VideoCapture(str(video_path))
 
     if not cap.isOpened():
@@ -14,7 +19,7 @@ def iter_clips( video_path, window_sec=3.0, stride_sec=1.5, num_frames=16 ):
     total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
     try:
-        if fps <= 0:
+        if not np.isfinite(fps) or fps <= 0:
             raise ValueError("FPS non validi")
 
         window = round(window_sec * fps)
@@ -25,6 +30,7 @@ def iter_clips( video_path, window_sec=3.0, stride_sec=1.5, num_frames=16 ):
 
         for start in range(0, total - window + 1, stride):
 
+            # Sample frame positions uniformly within the window.
             indices = set(
                 np.linspace(
                     0, window - 1, num_frames,
@@ -45,10 +51,14 @@ def iter_clips( video_path, window_sec=3.0, stride_sec=1.5, num_frames=16 ):
 
                 if j in indices:
                     frames.append(frame)
+                    # These times use video FPS, not the original camera timestamps.
                     timestamps.append((start + j) / fps)
 
             if len(frames) == num_frames:
                 yield {
+                    "start_frame": start,
+                    "end_frame_exclusive": start + window,
+                    "sampled_frame_indices": [int(start + j) for j in sorted(indices)],
                     "start_time": start / fps,
                     "end_time": (start + window) / fps,
                     "frame_times": timestamps,
