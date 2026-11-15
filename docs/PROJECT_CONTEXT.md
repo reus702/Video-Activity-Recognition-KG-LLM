@@ -74,9 +74,9 @@ The second command is an alternative fresh run directory, not a required second 
 
 1. Run the safe batch on completed new recordings and inspect class/segment coverage, including disassembly. Initial target classes: PICK, INSERT, REMOVE, PLACE; exclude IDLE and unlabeled windows from the first experiment and document this limitation.
 2. Inspect temporal alignment and sample labeled clips in notebooks across recordings.
-3. Implement persistent support/validation/test splits by recording (official splits if suitable), with no recording overlap. Select shots from distinct action segments; overlapping windows are not independent examples. Target 5 or 10 examples per class where data allow.
-4. Add experiment orchestration for the existing prototype classifier, repeat support sampling with recorded seeds, select settings on validation and evaluate on held-out test recordings.
-5. Report Accuracy, Macro-F1, Top-3 Accuracy, confusion matrix and class counts. No split or evaluation pipeline has been implemented yet. Keep KnowRob and LLM integration deferred.
+3. Use the implemented persistent recording splits and segment-based support selection described below; validate coverage before preparing a 5- or 10-shot experiment. Official splits can be supplied manually.
+4. Run the implemented experiment commands with recorded support seeds, choose settings on validation, then explicitly evaluate held-out test recordings.
+5. Inspect saved Accuracy, Macro-F1, Top-3 Accuracy, confusion matrix and class counts. The split/evaluation pipeline is implemented and tested synthetically; real held-out evaluation remains to be run. Keep KnowRob and LLM integration deferred.
 
 ## Open issues
 
@@ -85,3 +85,39 @@ The second command is an alternative fresh run directory, not a required second 
 - The pretrained video encoder was evaluated at 16 frames at 15 fps; our 16 frames over 3 s sample motion more sparsely. Compare temporal sampling on validation later.
 - YOLO COCO vocabulary does not cover many robot components or assembly objects. Inspect detections before using them for KG evidence; decide on domain-specific detection later.
 - KnowRob was previously explored in Docker/ROS/Prolog; actual ontology mappings, retrieval rules and KG-only scoring are not yet implemented/verified.
+
+
+## Few-shot experiment implementation — 2026-11-15
+
+- Added `src/splitting.py`, `src/experiment.py`, `src/evaluation.py` and `tests/test_few_shot.py`. No new HDF5 recordings were processed for this milestone; encoder, YOLO, KnowRob and LLM are not used by the experiment runner.
+- `main.py prepare-experiment` freezes support/validation/test recording IDs and selected support clips in a new experiment directory. Default classes: PICK, INSERT, REMOVE, PLACE; IDLE, unlabeled windows and unrequested classes are excluded. Failed attempts remain in their activity class.
+- Automatic splitting uses a seeded class-coverage search, not prediction scores or an official REASSEMBLE split. Small search spaces are exhaustive; larger searches are limited to 5000 assignments. Default fractions are 20% validation and 20% test. A manual or official assignment can be passed via `--split-file`: a JSON object containing support/validation/test lists of recording IDs. Every input recording must be assigned exactly once; multiple camera outputs for one recording are rejected.
+- Every class must occur in each partition. Support must provide K distinct `(recording_id, segment_id)` pairs per class. Each sampled segment contributes its central eligible window. Multiple segments from a support recording are allowed; these are not guaranteed statistically independent examples.
+- `plan.json` records class order, shots, split/support seeds, exact support clip IDs, configuration and SHA256 fingerprints of manifests, clip metadata and eligible embeddings. Mixed extraction configurations are rejected. Newly added recordings do not change an existing plan. Modified prepared inputs are rejected at evaluation. Plans store an absolute input root; prepare a new plan after relocating the dataset.
+- `main.py evaluate-experiment` defaults to validation and connects the existing raw-mean/cosine Prototype Classifier to saved embeddings. Explicit `--partition test` is required for test evaluation. Select settings on validation and keep recording splits fixed across comparisons; no automatic tuning is implemented.
+- Each partition saves `seed_<seed>.json` with prototypes, predictions, requested `top_k`, full `candidates`, original clip metadata and metrics, plus `summary.json` with mean/population standard deviation across seeds. These are not confidence intervals. Accuracy, fixed-class Macro-F1, Top-3 Accuracy, confusion matrix (rows=true, columns=predicted), class counts and per-class F1 are computed without new dependencies. Top-3 uses full rankings even if displayed top-k is smaller. With fewer than three classes Top-3 is trivial.
+- Evaluation uses all eligible held-out windows; windows may overlap. Metrics describe strictly labeled action windows, not independent trials or continuous-video performance. Segment-level evaluation and unknown-action rejection remain future work. Optional detections are preserved as metadata but do not influence classification.
+- Existing outputs are not overwritten. Interrupted experiment/result directories are not resumed automatically; preserve them and use a new experiment directory. `video_embeddings.ipynb` includes a read-only viewer for saved top-k results.
+- Full usage and output descriptions are in `docs/FEW_SHOT_BASELINE.md`.
+
+Commands after enough recordings have been processed:
+
+```sh
+.venv/bin/python main.py prepare-experiment --experiment-dir outputs/experiments/prototype_5shot --shots 5 --seeds 0 1 2
+.venv/bin/python main.py evaluate-experiment --experiment-dir outputs/experiments/prototype_5shot
+# Only after validation choices are fixed:
+.venv/bin/python main.py evaluate-experiment --experiment-dir outputs/experiments/prototype_5shot --partition test
+```
+
+Validation: all 12 unit tests passed in Python 3.12, including the synthetic end-to-end few-shot run, manual/automatic splits, leakage and shot checks, reproducibility, changed-input rejection, safe outputs and known metric values. Both CLI help commands were checked. The new notebook viewer was validated with empty and synthetic populated results. No real held-out recognition score is claimed here. The three previously completed recordings alone lack sufficient four-class recording coverage for this protocol.
+
+
+## Source timestamp portability fix — 2026-11-15
+
+A moved recording retained identical source name, relative path, size and pipeline configuration,
+but its modification time differed by 42 ns. Source reuse now compares `mtime_ns` at microsecond
+precision, ignoring only digits below one microsecond. Raw source timestamps remain unchanged in
+manifests. File size/path/name and full configuration checks remain strict; this stat-based identity
+is still not a content checksum. A new regression test covers accepted submicrosecond rounding,
+rejected microsecond changes, size/path changes and unchanged manifest metadata. No dataset output
+or existing manifest is rewritten by this fix.

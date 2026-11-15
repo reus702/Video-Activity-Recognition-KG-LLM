@@ -93,6 +93,26 @@ class VisualPipelineTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             load_completed(directory, manifest["source"], manifest["config"], "hama1")
 
+    def test_source_timestamp_precision(self):
+        '''
+        Allow submicrosecond copy rounding while rejecting other source changes.
+        '''
+        self.run_batch()
+        directory = self.root / "output/recording_hama1"
+        path = directory / "manifest.json"
+        manifest = json.loads(path.read_text())
+        saved = manifest["source"]
+        saved["mtime_ns"] = (saved["mtime_ns"] // 1000) * 1000 + 100
+        path.write_text(json.dumps(manifest))
+        copied = {**saved, "mtime_ns": saved["mtime_ns"] + 42}
+        self.assertEqual(len(load_completed(directory, copied, manifest["config"], "hama1")), 3)
+        for changed in ({**saved, "mtime_ns": saved["mtime_ns"] + 1000},
+                        {**saved, "size": saved["size"] + 1},
+                        {**saved, "relative_path": "another.h5"}):
+            with self.assertRaises(ValueError):
+                load_completed(directory, changed, manifest["config"], "hama1")
+        self.assertEqual(json.loads(path.read_text())["source"], saved)
+
     def test_partial_output_and_duplicate_ids(self):
         '''
         Reject incomplete output folders and duplicate recording names.

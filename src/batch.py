@@ -9,6 +9,7 @@ import numpy as np
 def source_identity(path):
     '''
     Identify a source by name, byte size and modification time.
+    Reuse compares modification times at microsecond precision for portability.
     This detects common changes but is not a content checksum.
     '''
     path = Path(path)
@@ -49,9 +50,19 @@ def load_completed(directory, source, config, camera):
     directory = Path(directory)
     try:
         manifest = json.loads((directory / "manifest.json").read_text())
-        if (manifest["source"] != source or manifest["config"] != config
-                or manifest["camera"] != camera or not manifest["complete"]):
-            raise ValueError("Source or configuration changed")
+        saved_source, current_source = manifest["source"].copy(), source.copy()
+        # Copies between filesystems may round the final nanosecond digits.
+        # Keep original timestamps in metadata; normalize only this comparison.
+        for identity in (saved_source, current_source):
+            identity["mtime_ns"] //= 1000
+        if saved_source != current_source:
+            changed = sorted(key for key in set(saved_source) | set(current_source)
+                             if saved_source.get(key) != current_source.get(key))
+            raise ValueError(f"Source changed: {', '.join(changed)}")
+        if manifest["config"] != config:
+            raise ValueError("Processing configuration changed")
+        if manifest["camera"] != camera or not manifest["complete"]:
+            raise ValueError("Camera changed or recording incomplete")
         clips = json.loads((directory / "clips.json").read_text())
         if not clips or len(clips) != manifest["clip_count"]:
             raise ValueError("Incomplete clip metadata")

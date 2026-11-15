@@ -1,4 +1,5 @@
 import argparse
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -25,7 +26,12 @@ def main():
     Process new recordings and reuse verified completed outputs.
     Keep legacy outputs untouched and stop on incomplete or incompatible records.
     '''
-    parser = argparse.ArgumentParser(description="Prepare the visual baseline dataset")
+    if len(sys.argv) > 1 and sys.argv[1] in ("prepare-experiment", "evaluate-experiment"):
+        experiment_main()
+        return
+    parser = argparse.ArgumentParser(
+        description="Prepare the visual baseline dataset",
+        epilog="Experiments: main.py prepare-experiment --help or evaluate-experiment --help")
     parser.add_argument("--raw-dir", type=Path, default=RAW_DIR)
     parser.add_argument("--output-dir", type=Path, default=OUTPUT_DIR)
     args = parser.parse_args()
@@ -113,6 +119,44 @@ def main():
     report_path = output_dir / f"dataset_report_{stamp}.json"
     write_json(report_path, report)
     print(f"Report: {report_path} ({report['recording_count']} recordings, {report['clip_count']} clips)")
+
+
+def experiment_main():
+    '''
+    Prepare reproducible few-shot experiments or evaluate one held-out partition.
+    '''
+    from src.experiment import prepare_experiment, evaluate_experiment
+    from src.splitting import DEFAULT_CLASSES
+
+    parser = argparse.ArgumentParser(description="Few-shot visual baseline experiments")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    prepare = subparsers.add_parser("prepare-experiment", help="Freeze split and support selections")
+    prepare.add_argument("--data-dir", type=Path, default=OUTPUT_DIR)
+    prepare.add_argument("--experiment-dir", type=Path, required=True)
+    prepare.add_argument("--classes", nargs="+", default=list(DEFAULT_CLASSES))
+    prepare.add_argument("--shots", type=int, default=5)
+    prepare.add_argument("--seeds", nargs="+", type=int, default=[0, 1, 2])
+    prepare.add_argument("--split-seed", type=int, default=42)
+    prepare.add_argument("--validation-fraction", type=float, default=0.2)
+    prepare.add_argument("--test-fraction", type=float, default=0.2)
+    prepare.add_argument("--split-file", type=Path, help="Manual JSON with support/validation/test recording IDs")
+    evaluate = subparsers.add_parser("evaluate-experiment", help="Predict and save top-k and metrics")
+    evaluate.add_argument("--experiment-dir", type=Path, required=True)
+    evaluate.add_argument("--partition", choices=["validation", "test"], default="validation")
+    evaluate.add_argument("--top-k", type=int, default=3)
+    args = parser.parse_args()
+    if args.command == "prepare-experiment":
+        plan = prepare_experiment(args.data_dir, args.experiment_dir, args.classes, args.shots,
+                                  args.seeds, args.split_seed, args.validation_fraction,
+                                  args.test_fraction, args.split_file)
+        print("Split:", plan["split"])
+        print("Segments per class:", plan["segment_counts"])
+        print("Saved:", args.experiment_dir / "plan.json")
+    else:
+        summary = evaluate_experiment(args.experiment_dir, args.partition, args.top_k)
+        print("Partition:", summary["partition"], "Queries:", summary["query_count_per_seed"])
+        print("Metrics:", summary["metrics"])
+        print("Top-k predictions:", args.experiment_dir / args.partition / "seed_<seed>.json")
 
 
 if __name__ == "__main__":
