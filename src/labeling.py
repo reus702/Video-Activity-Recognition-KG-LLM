@@ -3,6 +3,10 @@ import h5py
 import numpy as np
 
 
+class OverlappingSegmentsError(ValueError):
+    '''Raised when two annotation segments overlap.'''
+
+
 def load_annotations(h5_path, camera="hama1"):
     '''
     Load and validate segment annotations and original camera timestamps.
@@ -47,7 +51,7 @@ def load_annotations(h5_path, camera="hama1"):
     annotations.sort(key=lambda ann: ann["start"])
     for previous, current in zip(annotations, annotations[1:]):
         if current["start"] < previous["end"]:
-            raise ValueError("Overlapping annotation segments")
+            raise OverlappingSegmentsError("Overlapping annotation segments")
     return annotations, timestamps
 
 

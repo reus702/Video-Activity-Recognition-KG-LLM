@@ -121,3 +121,68 @@ manifests. File size/path/name and full configuration checks remain strict; this
 is still not a content checksum. A new regression test covers accepted submicrosecond rounding,
 rejected microsecond changes, size/path changes and unchanged manifest metadata. No dataset output
 or existing manifest is rewritten by this fix.
+
+## Official REASSEMBLE selection — 2026-11-20
+
+- `prepare-reassemble` creates a dataset plan from the official training and
+  test lists. It checks annotation structure and camera timestamps. The explicit
+  overlap exclusion option records each excluded ID, its official partition,
+  and the reason. The batch reads selected HDF5 files directly from the original
+  dataset directory through `--dataset-plan`.
+- The local plan at `outputs/reassemble_137_plan.json` selects 101 train and
+  36 test recordings. It records 11 official recordings excluded for overlaps
+  (10 train and 1 test). The results from this selection describe a subset of
+  the official split.
+- Experiment preparation accepts the same plan and derives support and
+  validation from official train. The default seed and validation fraction give
+  81 support, 20 validation and 36 test recordings. A metadata check on the
+  137 real recordings confirmed coverage of all four classes and at least five
+  distinct support segments per class. Experiment preparation repeats this
+  check on the saved labeled windows.
+- All 16 unit tests passed in the Windows Python 3.12 environment using a
+  test-runner workaround for sandbox permissions on temporary directories.
+  A separate temporary batch opened two real HDF5 files from the external drive
+  through a dataset plan and produced 73 valid pretrained R(2+1)D-18 embeddings.
+
+## Full visual extraction for the selected REASSEMBLE recordings — 2026-11-20
+
+- The completed batch in `outputs/visual_reassemble_137/` contains 137
+  recording manifests and 28,622 clip embeddings. The final report is
+  `dataset_report_20261120T135503639048Z.json`. All selected recording IDs
+  have complete manifests, and every clip references an existing embedding.
+- Saved metadata contains 19,907 windows in the four target classes, 163 IDLE
+  windows and 8,552 unlabeled windows. The default recording split satisfies
+  5-shot coverage on the saved metadata, with 2,895 validation and 4,483
+  test windows in the target classes.
+
+## First real visual 5-shot evaluation — 2026-11-20
+
+- The current local run uses `outputs/reassemble_plan.json` and
+  `outputs/visual_reassemble/`. The frozen experiment and both result
+  partitions are in `outputs/experiments/reassemble_5shot/`. The experiment
+  used 81 support, 20 validation and 36 test recordings, with five distinct
+  support segments per class and support seeds 0, 1 and 2.
+- Validation (2,895 windows) gave 34.29% Accuracy, 30.47% Macro-F1 and
+  81.77% Top-3 Accuracy. Test (4,483 windows) gave 32.69% Accuracy,
+  30.07% Macro-F1 and 82.76% Top-3 Accuracy. These are window-level means
+  across support seeds on the selected subset of the official split.
+- A constant ranking by class frequency over labeled windows in the support
+  recordings gave 49.15% Accuracy, 16.48% Macro-F1 and 92.37% Top-3 Accuracy
+  on validation. This is a class-imbalance diagnostic using labels from the
+  full support pool. Validation F1 was lowest for PLACE (15.99%).
+
+## Shot count and support normalization comparisons — 2026-11-20
+
+- `prepare-experiment --normalize-support` freezes the choice to L2-normalize
+  each support embedding before computing the class mean. Raw means remain the
+  default. Both policies read the saved vectors and rank queries by cosine
+  similarity. At equal shot count and seed they use the same support clips.
+- New evaluation summaries include per-class F1 means and population standard
+  deviations across seeds. Compare raw 5-shot, raw 10-shot, and normalized
+  5-shot on the same validation recordings.
+- All 17 unit tests passed in the Windows Python 3.12 environment using the
+  temporary-directory workaround. A temporary real 10-shot normalized run
+  used the saved split and 2,895 validation windows, and reported PLACE F1.
+  The comparison across ten seeds is pending.
+
+See `docs/FEW_SHOT_BASELINE.md` for the commands.

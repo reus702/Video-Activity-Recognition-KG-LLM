@@ -1,7 +1,41 @@
 # Visual few-shot baseline
 
-This stage reads completed outputs from `outputs/visual_baseline/`. It does not
-extract video, load the encoder, or use YOLO/KG/LLM features.
+The experiment stage reads completed clip metadata and embeddings. Prototype
+classification uses the visual vectors and labeled support clips.
+
+## Prepare REASSEMBLE using the official split
+
+Run these commands from the repository root in PowerShell. Point
+`--dataset-root` at the directory containing REASSEMBLE's `data/` and `splits/`.
+
+```powershell
+.\.venv\Scripts\python.exe main.py prepare-reassemble --dataset-root 'E:\Reassemble Dataset' --plan-file outputs/reassemble_137_plan.json --exclude-overlaps
+.\.venv\Scripts\python.exe main.py --dataset-plan outputs/reassemble_137_plan.json --output-dir outputs/visual_reassemble_137
+.\.venv\Scripts\python.exe main.py prepare-experiment --dataset-plan outputs/reassemble_137_plan.json --data-dir outputs/visual_reassemble_137 --experiment-dir outputs/experiments/reassemble_137_5shot --shots 5 --seeds 0 1 2
+```
+
+`prepare-reassemble` reads `train_split1.txt` and `test_split1.txt` and checks
+the camera timestamps and annotations of the listed HDF5 files. The resulting
+plan records the raw data path, the selected IDs in each official partition, and
+the ID, partition and reason for each exclusion. The optional
+`--exclude-overlaps` flag admits a subset by recording and excluding files with
+overlapping segments. The default rejects overlaps. Missing files and other
+invalid annotations stop preparation. Use a new plan filename for a new audit.
+
+The batch opens the original HDF5 files at the path stored in the plan. Give it a
+dedicated output directory for this selection. `prepare-experiment` requires
+completed outputs matching the selected recording IDs. It derives validation
+from the official train recordings with `--split-seed` (default 42) and
+`--validation-fraction` (default 0.2), uses the remaining train recordings as
+support, and reserves the selected official test recordings for final evaluation.
+It checks coverage on saved windows and stores the dataset plan and assignments
+in the experiment's `plan.json`.
+
+For the audited local copy, the overlap policy selects 101 official train and
+36 official test recordings and records 11 exclusions. Report results on this
+selection as a subset of the official split. Continue with the validation and
+test commands below, using `outputs/experiments/reassemble_137_5shot` as the
+experiment directory.
 
 ## 1. Prepare an experiment
 
@@ -56,7 +90,10 @@ shot-count comparisons. Each experiment requires a new output directory.
 ```
 
 For each support seed the classifier averages the raw support embeddings per class,
-then ranks query windows by cosine similarity. Scores are not probabilities.
+then ranks query windows by cosine similarity. To compare normalized support,
+add `--normalize-support` to `prepare-experiment`. This scales each support vector
+to unit L2 norm before averaging. The plan records the choice, and evaluation
+applies it to the saved embeddings in memory. Scores are not probabilities.
 
 Read `validation/seed_0.json` (and the other seeds):
 
@@ -67,13 +104,24 @@ Read `validation/seed_0.json` (and the other seeds):
 - `prototypes`: fitted class vectors.
 
 `validation/summary.json` contains metric means and population standard deviations
-across support seeds. Top-3 Accuracy always uses the first three candidates in the
+across support seeds, including per-class F1 under `f1_by_class`. Top-3 Accuracy
+always uses the first three candidates in the
 full ranking, independently of display `--top-k`. Confusion matrix rows are true
 classes and columns are predicted classes, ordered by `class_order`.
 
 These are **window-level** results on strictly labeled windows. Query windows may
 overlap; they are not independent trials. These metrics do not evaluate IDLE,
 transitions or unknown-action rejection. Segment-level evaluation is not implemented.
+
+### Compare shot count and support normalization
+
+Use a new experiment directory per configuration. Compare raw 5-shot versus raw
+10-shot to measure the effect of support size, and raw 5-shot versus normalized
+5-shot to measure the effect of normalization. Use the same dataset plan,
+split seed, validation fraction, and support seeds across configurations.
+At equal shot count the same seed selects the same support clips. For each run,
+evaluate validation and compare `metrics.macro_f1` and `f1_by_class.PLACE` in
+`validation/summary.json`.
 
 ## 3. Evaluate test after choices are fixed
 

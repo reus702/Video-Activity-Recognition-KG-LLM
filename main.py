@@ -9,6 +9,7 @@ from src.batch import load_completed, pipeline_config, source_identity, write_js
 from src.dataset import extract_video
 from src.dataset_report import summarize_dataset
 from src.labeling import label_clips, load_annotations, validate_video
+from src.reassemble import load_reassemble_plan, prepare_reassemble, recording_paths
 from src.video_processing import iter_clips
 
 ROOT = Path(__file__).resolve().parent
@@ -26,17 +27,31 @@ def main():
     Process new recordings and reuse verified completed outputs.
     Keep legacy outputs untouched and stop on incomplete or incompatible records.
     '''
-    if len(sys.argv) > 1 and sys.argv[1] in ("prepare-experiment", "evaluate-experiment"):
+    command = sys.argv[1] if len(sys.argv) > 1 else None
+    if command == "prepare-reassemble":
+        prepare_reassemble_main()
+        return
+    if command in ("prepare-experiment", "evaluate-experiment"):
         experiment_main()
         return
     parser = argparse.ArgumentParser(
         description="Prepare the visual baseline dataset",
-        epilog="Experiments: main.py prepare-experiment --help or evaluate-experiment --help")
-    parser.add_argument("--raw-dir", type=Path, default=RAW_DIR)
+        epilog="Commands: prepare-reassemble, prepare-experiment, evaluate-experiment")
+    inputs = parser.add_mutually_exclusive_group()
+    inputs.add_argument("--raw-dir", type=Path, default=RAW_DIR)
+    inputs.add_argument("--dataset-plan", type=Path, help="Read only the selected REASSEMBLE recordings")
     parser.add_argument("--output-dir", type=Path, default=OUTPUT_DIR)
     args = parser.parse_args()
-    raw_dir, output_dir = args.raw_dir.resolve(), args.output_dir.resolve()
-    h5_files = sorted(raw_dir.rglob("*.h5"))
+    output_dir = args.output_dir.resolve()
+    if args.dataset_plan is None:
+        raw_dir = args.raw_dir.resolve()
+        h5_files = sorted(raw_dir.rglob("*.h5"))
+    else:
+        plan = load_reassemble_plan(args.dataset_plan)
+        if plan["camera"] != CAMERA:
+            raise ValueError(f"Dataset plan must use camera {CAMERA}")
+        raw_dir = Path(plan["raw_dir"])
+        h5_files = recording_paths(raw_dir, plan["split"])
     if not h5_files:
         raise FileNotFoundError(f"No HDF5 recordings found in {raw_dir}")
 
@@ -115,10 +130,25 @@ def main():
     # Each report is a new snapshot; earlier reports remain available.
     report = summarize_dataset(all_clips)
     report["input_root"] = str(raw_dir)
+    if args.dataset_plan is not None:
+        report["dataset_plan"] = str(args.dataset_plan.resolve())
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     report_path = output_dir / f"dataset_report_{stamp}.json"
     write_json(report_path, report)
     print(f"Report: {report_path} ({report['recording_count']} recordings, {report['clip_count']} clips)")
+
+
+def prepare_reassemble_main():
+    '''Validate the official dataset selection and write its plan.'''
+    parser = argparse.ArgumentParser(description="Prepare a plan from the official REASSEMBLE split")
+    parser.add_argument("--dataset-root", type=Path, required=True, help="Folder containing data and splits")
+    parser.add_argument("--plan-file", type=Path, required=True, help="New dataset plan JSON path")
+    parser.add_argument("--exclude-overlaps", action="store_true",
+                        help="Record and exclude HDF5 recordings with overlapping annotations")
+    args = parser.parse_args(sys.argv[2:])
+    plan = prepare_reassemble(args.dataset_root, args.plan_file, args.exclude_overlaps, CAMERA)
+    print(f"Saved: {args.plan_file} ({len(plan['split']['train'])} train, "
+          f"{len(plan['split']['test'])} test, {len(plan['excluded'])} excluded)")
 
 
 def experiment_main():
@@ -136,10 +166,14 @@ def experiment_main():
     prepare.add_argument("--classes", nargs="+", default=list(DEFAULT_CLASSES))
     prepare.add_argument("--shots", type=int, default=5)
     prepare.add_argument("--seeds", nargs="+", type=int, default=[0, 1, 2])
+    prepare.add_argument("--normalize-support", action="store_true",
+                         help="Normalize each support embedding to unit length before averaging")
     prepare.add_argument("--split-seed", type=int, default=42)
     prepare.add_argument("--validation-fraction", type=float, default=0.2)
-    prepare.add_argument("--test-fraction", type=float, default=0.2)
-    prepare.add_argument("--split-file", type=Path, help="Manual JSON with support/validation/test recording IDs")
+    prepare.add_argument("--test-fraction", type=float, default=0.2, help="Fraction for automatic splitting")
+    split = prepare.add_mutually_exclusive_group()
+    split.add_argument("--split-file", type=Path, help="Manual JSON with support/validation/test recording IDs")
+    split.add_argument("--dataset-plan", type=Path, help="Use the official test IDs from a REASSEMBLE plan")
     evaluate = subparsers.add_parser("evaluate-experiment", help="Predict and save top-k and metrics")
     evaluate.add_argument("--experiment-dir", type=Path, required=True)
     evaluate.add_argument("--partition", choices=["validation", "test"], default="validation")
@@ -148,7 +182,8 @@ def experiment_main():
     if args.command == "prepare-experiment":
         plan = prepare_experiment(args.data_dir, args.experiment_dir, args.classes, args.shots,
                                   args.seeds, args.split_seed, args.validation_fraction,
-                                  args.test_fraction, args.split_file)
+                                  args.test_fraction, args.split_file, dataset_plan_file=args.dataset_plan,
+                                  normalize_support=args.normalize_support)
         print("Split:", plan["split"])
         print("Segments per class:", plan["segment_counts"])
         print("Saved:", args.experiment_dir / "plan.json")
@@ -156,6 +191,7 @@ def experiment_main():
         summary = evaluate_experiment(args.experiment_dir, args.partition, args.top_k)
         print("Partition:", summary["partition"], "Queries:", summary["query_count_per_seed"])
         print("Metrics:", summary["metrics"])
+        print("F1 by class:", summary["f1_by_class"])
         print("Top-k predictions:", args.experiment_dir / args.partition / "seed_<seed>.json")
 
 

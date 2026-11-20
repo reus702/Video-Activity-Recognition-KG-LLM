@@ -6,10 +6,15 @@ import platform
 import numpy as np
 
 from src.batch import write_json
-from src.evaluation import aggregate_metrics, classification_metrics
+from src.evaluation import aggregate_f1_by_class, aggregate_metrics, classification_metrics
 from src.inspection import load_embedding, load_recordings
 from src.prototype_classifier import PrototypeClassifier
-from src.splitting import create_split, select_support, validate_split
+from src.reassemble import load_reassemble_plan
+from src.splitting import create_split, select_support, split_with_fixed_test, validate_split
+
+
+RAW_SUPPORT_MEAN = "mean_raw_embeddings_then_cosine"
+NORMALIZED_SUPPORT_MEAN = "mean_l2_normalized_embeddings_then_cosine"
 
 
 def file_digest(path):
@@ -68,7 +73,8 @@ def build_catalog(data_dir, classes, recording_names=None):
 
 
 def prepare_experiment(data_dir, experiment_dir, classes, shots, seeds, split_seed=42,
-                       validation_fraction=0.2, test_fraction=0.2, split_file=None):
+                       validation_fraction=0.2, test_fraction=0.2, split_file=None,
+                       dataset_plan_file=None, normalize_support=False):
     '''
     Freeze recording splits and support selections in a new experiment folder.
     Do not classify queries or process raw HDF5 files.
@@ -84,6 +90,8 @@ def prepare_experiment(data_dir, experiment_dir, classes, shots, seeds, split_se
             or any(not isinstance(seed, int) or isinstance(seed, bool) or seed < 0 for seed in seeds)
             or split_seed < 0):
         raise ValueError("Use distinct nonnegative integer seeds")
+    if split_file is not None and dataset_plan_file is not None:
+        raise ValueError("Choose either a manual split or a REASSEMBLE dataset plan")
     experiment_dir = Path(experiment_dir)
     if experiment_dir.exists():
         raise FileExistsError(f"Experiment already exists: {experiment_dir}")
@@ -93,27 +101,44 @@ def prepare_experiment(data_dir, experiment_dir, classes, shots, seeds, split_se
     eligible_ids = {clip["recording_id"] for clip in clips}
     if eligible_ids != recording_ids:
         raise ValueError(f"Recordings without requested classes: {sorted(recording_ids - eligible_ids)}")
-    if split_file is not None:
+    dataset_plan = None
+    requested_fractions = {"validation": validation_fraction, "test": test_fraction}
+    if dataset_plan_file is not None:
+        dataset_plan = load_reassemble_plan(dataset_plan_file)
+        official = dataset_plan["split"]
+        planned_ids = set(official["train"] + official["test"])
+        if planned_ids != recording_ids:
+            raise ValueError(f"Outputs differ from the REASSEMBLE dataset plan: "
+                             f"missing {sorted(planned_ids - recording_ids)}, "
+                             f"unexpected {sorted(recording_ids - planned_ids)}")
+        split = split_with_fixed_test(official["train"], official["test"], split_seed,
+                                      validation_fraction)
+        split_method = "reassemble_official_test"
+        requested_fractions = {"validation_of_train": validation_fraction}
+    elif split_file is not None:
         split = json.loads(Path(split_file).read_text())
+        split_method = "manual"
     else:
         split = create_split(clips, classes, shots, split_seed, validation_fraction, test_fraction)
+        split_method = "seeded_class_coverage_search"
     counts = validate_split(split, clips, classes, shots)
     supports = {str(seed): [c["clip_id"] for c in select_support(
         clips, split["support"], classes, shots, seed)] for seed in seeds}
     plan = {
         "schema_version": 1, "data_dir": str(Path(data_dir).resolve()),
         "classes": classes, "shots": shots, "seeds": seeds, "split_seed": split_seed,
-        "split_method": "manual" if split_file else "seeded_class_coverage_search",
-        "requested_fractions": {"validation": validation_fraction, "test": test_fraction},
+        "split_method": split_method, "requested_fractions": requested_fractions,
         "split": split, "segment_counts": counts, "support_clip_ids": supports,
         "snapshot": snapshots, "embedding_config": config,
-        "classifier": "mean_raw_embeddings_then_cosine",
+        "classifier": NORMALIZED_SUPPORT_MEAN if normalize_support else RAW_SUPPORT_MEAN,
         "support_policy": "distinct segments; central eligible window per chosen segment",
         "query_policy": "all labeled windows in held-out recordings",
         "excluded": ["IDLE", "unlabeled", "classes outside the requested list"],
         "caveat": "Query windows can overlap; window-level metrics do not treat them as independent trials.",
         "runtime": {"python": platform.python_version(), "numpy": np.__version__}
     }
+    if dataset_plan is not None:
+        plan["dataset_plan"] = dataset_plan
     experiment_dir.mkdir(parents=True)
     write_json(experiment_dir / "plan.json", plan)
     return plan
@@ -133,6 +158,9 @@ def evaluate_experiment(experiment_dir, partition="validation", top_k=3):
     if result_dir.exists():
         raise FileExistsError(f"Results already exist: {result_dir}")
     plan = json.loads((experiment_dir / "plan.json").read_text())
+    classifier_policy = plan["classifier"]
+    if classifier_policy not in (RAW_SUPPORT_MEAN, NORMALIZED_SUPPORT_MEAN):
+        raise ValueError(f"Unknown classifier policy: {classifier_policy!r}")
     catalog, snapshots, _, _ = build_catalog(plan["data_dir"], plan["classes"], plan["snapshot"])
     if snapshots != plan["snapshot"]:
         raise ValueError("Prepared metadata or embeddings changed; create a new experiment")
@@ -149,7 +177,7 @@ def evaluate_experiment(experiment_dir, partition="validation", top_k=3):
         if expected != plan["support_clip_ids"][str(seed)]:
             raise ValueError("Saved support selection does not match the plan")
         support = [catalog[clip_id] for clip_id in expected]
-        classifier = PrototypeClassifier()
+        classifier = PrototypeClassifier(normalize_support=classifier_policy == NORMALIZED_SUPPORT_MEAN)
         classifier.fit(np.stack([item["embedding"] for item in support]),
                        [item["clip"]["ground_truth"] for item in support])
         predictions = []
@@ -167,9 +195,11 @@ def evaluate_experiment(experiment_dir, partition="validation", top_k=3):
     result_dir.mkdir()
     for result in results:
         write_json(result_dir / f"seed_{result['seed']}.json", result)
+    metrics = [result["metrics"] for result in results]
     summary = {"partition": partition, "seeds": plan["seeds"], "display_top_k": top_k,
                "plan_sha256": file_digest(experiment_dir / "plan.json"),
-               "metrics": aggregate_metrics([r["metrics"] for r in results]),
+               "shots": plan["shots"], "classifier": classifier_policy,
+               "metrics": aggregate_metrics(metrics), "f1_by_class": aggregate_f1_by_class(metrics),
                "query_count_per_seed": len(queries), "class_order": plan["classes"],
                "caveat": plan["caveat"], "complete": True}
     write_json(result_dir / "summary.json", summary)

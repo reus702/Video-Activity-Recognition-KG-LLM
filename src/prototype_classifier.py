@@ -3,15 +3,16 @@ import numpy as np
 
 class PrototypeClassifier:
 
-    def __init__(self):
+    def __init__(self, normalize_support=False):
         '''
-        Create an empty mapping of class labels to prototypes.
+        Set the support normalization policy and start with no prototypes.
         '''
+        self.normalize_support = normalize_support
         self.prototypes = {}
 
     def fit(self, embeddings, labels):
         '''
-        Replace prototypes with class means of raw support embeddings.
+        Replace prototypes with class means, optionally using unit support vectors.
         Reject empty inputs, invalid vectors and missing labels.
         '''
         embeddings = np.asarray(embeddings, dtype=float)
@@ -19,11 +20,14 @@ class PrototypeClassifier:
         if (embeddings.ndim != 2 or 0 in embeddings.shape or labels.ndim != 1
                 or len(labels) != len(embeddings)):
             raise ValueError("Expected a nonempty embedding matrix and one label per row")
-        if (not np.isfinite(embeddings).all()
-                or np.any(np.linalg.norm(embeddings, axis=1) == 0)):
+        norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+        if not np.isfinite(norms).all() or np.any(norms == 0):
             raise ValueError("Support vectors must be finite and nonzero")
         if any(not isinstance(label, str) or not label.strip() for label in labels):
             raise ValueError("Labels must be nonempty strings")
+        if self.normalize_support:
+            # Let each support vector contribute a unit-length direction.
+            embeddings = embeddings / norms
         prototypes = {str(label): embeddings[labels == label].mean(axis=0)
                       for label in np.unique(labels)}
         if any(np.linalg.norm(vector) == 0 for vector in prototypes.values()):

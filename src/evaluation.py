@@ -30,10 +30,19 @@ def classification_metrics(predictions, classes):
     }
 
 
+def _mean_and_std(values):
+    return {"mean": float(np.mean(values)), "std": float(np.std(values))}
+
+
 def aggregate_metrics(metrics):
     '''
     Summarize variation across support seeds, not confidence intervals.
     '''
-    return {key: {"mean": float(np.mean([m[key] for m in metrics])),
-                  "std": float(np.std([m[key] for m in metrics]))}
+    return {key: _mean_and_std([m[key] for m in metrics])
             for key in ("accuracy", "macro_f1", "top_3_accuracy")}
+
+
+def aggregate_f1_by_class(metrics):
+    '''Summarize each class's window-level F1 across support seeds.'''
+    return {label: _mean_and_std([m["f1_by_class"][label] for m in metrics])
+            for label in metrics[0]["class_order"]}

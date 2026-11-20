@@ -96,6 +96,20 @@ def create_split(clips, classes, shots, seed=42, validation_fraction=0.2, test_f
     raise ValueError("No valid split found at these fractions. Add recordings or provide a manual --split-file")
 
 
+def split_with_fixed_test(train_ids, test_ids, seed, validation_fraction):
+    '''Reserve validation recordings from train and keep the supplied test IDs.'''
+    if not 0 < validation_fraction < 1:
+        raise ValueError("Validation fraction must be between zero and one")
+    validation_count = max(1, round(len(train_ids) * validation_fraction))
+    if validation_count >= len(train_ids):
+        raise ValueError("Official train split needs distinct support and validation recordings")
+
+    # Sorting before sampling makes the split independent of the text file order.
+    train = np.random.default_rng(seed).permutation(sorted(train_ids)).tolist()
+    return {"support": sorted(train[validation_count:]),
+            "validation": sorted(train[:validation_count]), "test": sorted(test_ids)}
+
+
 def select_support(clips, recording_ids, classes, shots, seed):
     '''
     Sample distinct segments per class and take the central eligible window.

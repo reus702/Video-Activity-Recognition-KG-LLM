@@ -2,6 +2,7 @@ import contextlib
 import io
 import json
 from pathlib import Path
+import shutil
 import sys
 import tempfile
 import types
@@ -16,8 +17,9 @@ import main
 from src.batch import load_completed
 from src.dataset import extract_video
 from src.inspection import detection_rows, load_embedding, load_recordings
-from src.labeling import load_annotations
+from src.labeling import OverlappingSegmentsError, load_annotations
 from src.prototype_classifier import PrototypeClassifier
+from src.reassemble import load_reassemble_plan, prepare_reassemble
 
 
 class VisualPipelineTests(unittest.TestCase):
@@ -29,7 +31,7 @@ class VisualPipelineTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        self.raw = self.root / "raw"
+        self.raw = self.root / "data"
         self.raw.mkdir()
         video = self.root / "input.mp4"
         writer = cv2.VideoWriter(str(video), cv2.VideoWriter_fourcc(*"mp4v"), 10, (32, 32))
@@ -47,7 +49,7 @@ class VisualPipelineTests(unittest.TestCase):
                                "success": False}.items():
                 group[key] = value
 
-    def run_batch(self):
+    def run_batch(self, *input_args):
         '''
         Run the batch with a fake encoder to avoid model downloads.
         '''
@@ -59,8 +61,9 @@ class VisualPipelineTests(unittest.TestCase):
                 '''
                 return np.ones(512, dtype=np.float32)
         module.VideoFeatureExtractor = FakeEncoder
+        inputs = input_args or ("--raw-dir", str(self.raw))
         with patch.dict(sys.modules, {"src.feature_extraction": module}), patch.object(
-                sys, "argv", ["main.py", "--raw-dir", str(self.raw),
+                sys, "argv", ["main.py", *inputs,
                               "--output-dir", str(self.root / "output")]), contextlib.redirect_stdout(io.StringIO()):
             main.main()
 
@@ -139,6 +142,62 @@ class VisualPipelineTests(unittest.TestCase):
             f.copy("segments_info/0", "segments_info/1")
         with self.assertRaisesRegex(ValueError, "Overlapping"):
             load_annotations(self.h5)
+
+    def test_reassemble_plan_drives_batch(self):
+        '''Process official inputs in place and record explicit overlap exclusions.'''
+        splits = self.root / "splits"
+        splits.mkdir()
+        (splits / "train_split1.txt").write_text("overlap\nrecording\n")
+        (splits / "test_split1.txt").write_text("query\n")
+        shutil.copyfile(self.h5, self.raw / "query.h5")
+        overlap = self.raw / "overlap.h5"
+        shutil.copyfile(self.h5, overlap)
+        with h5py.File(overlap, "r+") as source:
+            source.copy("segments_info/0", "segments_info/1")
+        (self.raw / "unlisted.h5").write_bytes(b"not an HDF5 file")
+
+        plan_path = self.root / "plan.json"
+        with self.assertRaisesRegex(OverlappingSegmentsError, "overlap.h5"):
+            prepare_reassemble(self.root, plan_path)
+        self.assertFalse(plan_path.exists())
+        with patch.object(sys, "argv", ["main.py", "prepare-reassemble", "--dataset-root",
+                                        str(self.root), "--plan-file", str(plan_path),
+                                        "--exclude-overlaps"]), contextlib.redirect_stdout(io.StringIO()):
+            main.main()
+
+        plan = load_reassemble_plan(plan_path)
+        self.assertEqual(plan["split"], {"train": ["recording"], "test": ["query"]})
+        self.assertEqual(plan["excluded"]["overlap"], {
+            "partition": "train", "reason": "Overlapping annotation segments"
+        })
+        with self.assertRaises(FileExistsError):
+            prepare_reassemble(self.root, plan_path, exclude_overlaps=True)
+
+        self.run_batch("--dataset-plan", str(plan_path))
+        output = self.root / "output"
+        self.assertEqual(set(load_recordings(output)), {"recording_hama1", "query_hama1"})
+        report = json.loads(next(output.glob("dataset_report_*.json")).read_text())
+        self.assertEqual(report["input_root"], str(self.raw))
+        self.assertEqual(report["dataset_plan"], str(plan_path))
+        (self.raw / "query.h5").unlink()
+        with self.assertRaisesRegex(FileNotFoundError, "query.h5"):
+            self.run_batch("--dataset-plan", str(plan_path))
+
+    def test_reassemble_rejects_malformed_official_inputs(self):
+        '''Reject leakage and unexpected file errors even when overlaps can be excluded.'''
+        splits = self.root / "splits"
+        splits.mkdir()
+        (splits / "train_split1.txt").write_text("recording\n")
+        test = splits / "test_split1.txt"
+        test.write_text("recording\n")
+        plan_path = self.root / "plan.json"
+        with self.assertRaisesRegex(ValueError, "Duplicate recording IDs"):
+            prepare_reassemble(self.root, plan_path, exclude_overlaps=True)
+        test.write_text("broken\n")
+        (self.raw / "broken.h5").write_bytes(b"not an HDF5 file")
+        with self.assertRaisesRegex(ValueError, "Cannot validate.*broken.h5"):
+            prepare_reassemble(self.root, plan_path, exclude_overlaps=True)
+        self.assertFalse(plan_path.exists())
 
     def test_extraction_never_overwrites(self):
         '''

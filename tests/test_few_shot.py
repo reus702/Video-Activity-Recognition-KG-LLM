@@ -127,6 +127,65 @@ class FewShotTests(unittest.TestCase):
         self.assertEqual(plan["split"], split)
         self.assertEqual(plan["split_method"], "manual")
 
+    def test_support_normalization_is_frozen_in_plan(self):
+        '''Use identical support clips and change only how the class mean is built.'''
+        split_path = self.root / "split.json"
+        write_json(split_path, {"support": ["r0"], "validation": ["r1", "r2"],
+                                "test": ["r3", "r4", "r5"]})
+        embeddings = self.data / "r0_hama1" / "embeddings"
+        np.save(embeddings / "r0_PICK_0_1.npy", [3., 0., 0., 0.])
+        np.save(embeddings / "r0_PICK_1_1.npy", [0., 2., 0., 0.])
+        raw_dir, normalized_dir = self.root / "raw_mean", self.root / "normalized_mean"
+        raw = prepare_experiment(self.data, raw_dir, DEFAULT_CLASSES, 2, [0, 1],
+                                 split_file=split_path)
+        normalized = prepare_experiment(self.data, normalized_dir, DEFAULT_CLASSES, 2, [0, 1],
+                                        split_file=split_path, normalize_support=True)
+        self.assertEqual(raw["support_clip_ids"], normalized["support_clip_ids"])
+        self.assertEqual(raw["split"], normalized["split"])
+
+        for directory, plan, expected in ((raw_dir, raw, [1.5, 1., 0., 0.]),
+                                          (normalized_dir, normalized, [.5, .5, 0., 0.])):
+            summary = evaluate_experiment(directory)
+            self.assertEqual(summary["classifier"], plan["classifier"])
+            self.assertEqual(summary["f1_by_class"]["PLACE"], {"mean": 1., "std": 0.})
+            result_path = directory / "validation" / "seed_0.json"
+            result = json.loads(result_path.read_text())
+            np.testing.assert_allclose(result["prototypes"]["PICK"], expected)
+
+    def test_official_reassemble_split(self):
+        '''Build validation from train and evaluate only the official test IDs.'''
+        dataset_plan = {
+            "schema_version": 1,
+            "dataset": "REASSEMBLE",
+            "raw_dir": str(self.root / "raw"),
+            "camera": "hama1",
+            "split": {"train": ["r3", "r2", "r1", "r0"], "test": ["r5", "r4"]},
+            "excluded": {"r6": {"partition": "test", "reason": "Overlapping annotation segments"}},
+        }
+        dataset_plan_path = self.root / "dataset_plan.json"
+        write_json(dataset_plan_path, dataset_plan)
+        experiment = self.root / "official"
+        plan = prepare_experiment(self.data, experiment, DEFAULT_CLASSES, 2, [0, 1],
+                                  dataset_plan_file=dataset_plan_path)
+        self.assertEqual(plan["dataset_plan"], dataset_plan)
+        self.assertEqual(plan["split_method"], "reassemble_official_test")
+        self.assertEqual(plan["split"], {"support": ["r0", "r1", "r2"],
+                                         "validation": ["r3"], "test": ["r4", "r5"]})
+
+        for partition in ("validation", "test"):
+            evaluate_experiment(experiment, partition)
+            result = json.loads((experiment / partition / "seed_0.json").read_text())
+            self.assertEqual({clip["recording_id"] for clip in result["predictions"]},
+                             set(plan["split"][partition]))
+
+        dataset_plan["split"]["test"].append("r7")
+        invalid = self.root / "invalid_plan.json"
+        write_json(invalid, dataset_plan)
+        with self.assertRaisesRegex(ValueError, "missing.*r7"):
+            prepare_experiment(self.data, self.root / "mismatch", DEFAULT_CLASSES, 2, [0],
+                               dataset_plan_file=invalid)
+        self.assertFalse((self.root / "mismatch").exists())
+
     def test_changed_inputs(self):
         '''
         Reject edited metadata or embeddings after experiment preparation.
