@@ -183,6 +183,43 @@ or existing manifest is rewritten by this fix.
 - All 17 unit tests passed in the Windows Python 3.12 environment using the
   temporary-directory workaround. A temporary real 10-shot normalized run
   used the saved split and 2,895 validation windows, and reported PLACE F1.
-  The comparison across ten seeds is pending.
+
+## Validation comparison across ten support seeds — 2026-11-20
+
+All three runs used the same 2,895 validation windows, recording split, and
+embedding fingerprints. The two 5-shot runs used identical support clips
+per seed. Each configuration was evaluated on validation only.
+
+| Configuration | Accuracy | Macro-F1 | PLACE F1 | Top-3 Accuracy |
+| --- | ---: | ---: | ---: | ---: |
+| 5-shot, raw support | 32.86% | 29.12% | 14.87% | 80.13% |
+| 10-shot, raw support | 33.91% | 29.95% | 16.34% | 80.42% |
+| 5-shot, normalized support | 32.97% | 29.20% | 14.72% | 80.34% |
+
+Raw 10-shot improved Macro-F1 by 0.83 percentage points and PLACE F1 by
+1.46 points over raw 5-shot. Both metrics improved in eight of ten seed
+comparisons. The support draws for different shot counts were sampled
+separately. Normalizing 5-shot support changed Macro-F1 by +0.08 points and
+PLACE F1 by -0.15 points. Results are under `outputs/experiments/` in
+`reassemble_5shot_raw_10seeds`, `reassemble_10shot_raw_10seeds`, and
+`reassemble_5shot_norm_10seeds`.
 
 See `docs/FEW_SHOT_BASELINE.md` for the commands.
+
+## First KnowRob integration — 2026-11-20
+
+- The application ontology contains the four REASSEMBLE actions and two
+  preferred task transitions. The KnowRob 2 exporter queries those relations
+  through its Python binding and records the positive answers.
+- `evaluate-knowrob` reranks the four saved visual candidates on validation
+  with a soft bonus. The previous visual action comes from the closest
+  non-overlapping window in the same recording. The history includes all
+  windows, and query labels are used only for evaluation. Each result records
+  the evidence, visual and reranked scores, corrections and regressions.
+- All 19 unit tests passed. A run with synthetic evidence over the real
+  10-shot outputs reproduced the original visual metrics on 2,895 windows
+  for ten seeds. A real KnowRob query and knowledge-assisted metrics remain
+  unverified. The Windows environment has no available KnowRob runtime,
+  Docker CLI or installed WSL subsystem.
+
+See `docs/KNOWROB_BASELINE.md` for the export and evaluation commands.

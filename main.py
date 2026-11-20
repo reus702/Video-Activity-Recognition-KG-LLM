@@ -31,12 +31,15 @@ def main():
     if command == "prepare-reassemble":
         prepare_reassemble_main()
         return
+    if command == "evaluate-knowrob":
+        evaluate_knowrob_main()
+        return
     if command in ("prepare-experiment", "evaluate-experiment"):
         experiment_main()
         return
     parser = argparse.ArgumentParser(
         description="Prepare the visual baseline dataset",
-        epilog="Commands: prepare-reassemble, prepare-experiment, evaluate-experiment")
+        epilog="Commands: prepare-reassemble, prepare-experiment, evaluate-experiment, evaluate-knowrob")
     inputs = parser.add_mutually_exclusive_group()
     inputs.add_argument("--raw-dir", type=Path, default=RAW_DIR)
     inputs.add_argument("--dataset-plan", type=Path, help="Read only the selected REASSEMBLE recordings")
@@ -149,6 +152,24 @@ def prepare_reassemble_main():
     plan = prepare_reassemble(args.dataset_root, args.plan_file, args.exclude_overlaps, CAMERA)
     print(f"Saved: {args.plan_file} ({len(plan['split']['train'])} train, "
           f"{len(plan['split']['test'])} test, {len(plan['excluded'])} excluded)")
+
+
+def evaluate_knowrob_main():
+    '''Evaluate KnowRob evidence over saved visual validation predictions.'''
+    from src.knowrob_experiment import evaluate_knowrob
+
+    parser = argparse.ArgumentParser(description="Evaluate visual predictions reranked by KnowRob")
+    parser.add_argument("--experiment-dir", type=Path, required=True)
+    parser.add_argument("--evidence-file", type=Path, required=True)
+    parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--bonus", type=float, default=0.02,
+                        help="Score added to a candidate supported by KnowRob")
+    args = parser.parse_args(sys.argv[2:])
+    summary = evaluate_knowrob(args.experiment_dir, args.evidence_file, args.output_dir, args.bonus)
+    print("Visual metrics:", summary["visual_metrics"])
+    print("KnowRob metrics:", summary["metrics"])
+    print("Changes across seeds:", summary["changes_across_seeds"])
+    print("Saved:", args.output_dir / "summary.json")
 
 
 def experiment_main():

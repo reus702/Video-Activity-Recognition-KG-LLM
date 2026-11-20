@@ -1,0 +1,18 @@
+@prefix reassemble: <https://example.org/reassemble/actions#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+<https://example.org/reassemble/actions> a owl:Ontology .
+
+reassemble:Action a owl:Class .
+reassemble:preferredSuccessor a owl:ObjectProperty ;
+    rdfs:domain reassemble:Action ;
+    rdfs:range reassemble:Action .
+
+# These are possible task transitions, not constraints on consecutive windows.
+reassemble:pick a reassemble:Action ;
+    reassemble:preferredSuccessor reassemble:insert .
+reassemble:insert a reassemble:Action .
+reassemble:remove a reassemble:Action ;
+    reassemble:preferredSuccessor reassemble:place .
+reassemble:place a reassemble:Action .
