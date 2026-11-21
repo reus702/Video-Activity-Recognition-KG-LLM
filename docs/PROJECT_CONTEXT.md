@@ -218,8 +218,23 @@ See `docs/FEW_SHOT_BASELINE.md` for the commands.
   the evidence, visual and reranked scores, corrections and regressions.
 - All 19 unit tests passed. A run with synthetic evidence over the real
   10-shot outputs reproduced the original visual metrics on 2,895 windows
-  for ten seeds. A real KnowRob query and knowledge-assisted metrics remain
-  unverified. The Windows environment has no available KnowRob runtime,
-  Docker CLI or installed WSL subsystem.
+  for ten seeds. A live runtime was unavailable during that verification.
 
 See `docs/KNOWROB_BASELINE.md` for the export and evaluation commands.
+
+## Live KnowRob export and validation — 2026-11-21
+
+- On Ubuntu 24.04 in WSL2, KnowRob commit
+  `d03b865927d8634cef30e2e4ef9b60e948777b35` was built against SWI-Prolog 9.0.4.
+  The Python exporter now imports the binding with global symbol visibility
+  so SWI-Prolog can load its native RDF and socket modules. The exporter exited
+  successfully and saved the two preferred transitions. SWI-Prolog still
+  logs the upstream `plunit` diagnostic for `output(always)` at startup.
+- All 19 unit tests passed, including verification that the exporter restores
+  the interpreter's original loader flags after the import.
+- The live evidence in `outputs/knowrob_transition_evidence.json` was used
+  with the default 0.02 bonus on the 2,895 validation windows and ten seeds.
+  The visual and KnowRob runs gave 33.91% vs 34.07% Accuracy, 29.95% vs
+  25.16% Macro-F1, and 80.42% vs 81.56% Top-3 Accuracy. PLACE F1 remained
+  near 16.33%. There were 3,130 corrections and 3,084 regressions across
+  the seeds. See `outputs/experiments/reassemble_10shot_knowrob_validation/summary.json`.

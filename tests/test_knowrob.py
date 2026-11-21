@@ -4,7 +4,7 @@ import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 import numpy as np
 
@@ -35,8 +35,12 @@ class KnowRobTests(unittest.TestCase):
             QueryFlag=SimpleNamespace(QUERY_FLAG_ALL_SOLUTIONS=1),
             AnswerYes=PositiveAnswer,
         )
-        with patch.dict(sys.modules, {"knowrob": binding}):
+        with (patch.dict(sys.modules, {"knowrob": binding}),
+              patch.object(sys, "getdlopenflags", return_value=2, create=True),
+              patch.object(sys, "setdlopenflags", create=True) as set_dlopen_flags,
+              patch("src.knowrob_queries.os.RTLD_GLOBAL", 256, create=True)):
             evidence = query_transitions()
+        self.assertEqual(set_dlopen_flags.call_args_list, [call(258), call(2)])
         self.assertEqual(len(queries), 16)
         self.assertEqual(evidence["transitions"], [
             {"previous": "PICK", "candidate": "INSERT", "query": positive}

@@ -23,6 +23,12 @@ initial ontology is expected to yield two positive answers. The exporter
 reports an error when it cannot import KnowRob or receives no positive answers.
 Only the evidence JSON is needed back in the Windows workspace.
 
+On Linux, the exporter loads the binding with global symbol visibility so the
+embedded SWI-Prolog runtime can resolve symbols when loading the RDF and socket
+extensions. With the SWI-Prolog 9.0.4 build on Ubuntu 24.04, KnowRob can still
+log a `plunit` domain error for `output(always)` at startup. A successful
+export finishes with `Saved 2 KnowRob answers` and exit code 0.
+
 ## Compare on validation
 
 ```powershell

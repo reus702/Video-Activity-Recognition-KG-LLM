@@ -1,7 +1,9 @@
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
+import sys
 
 
 ACTIONS = ("PICK", "INSERT", "REMOVE", "PLACE")
@@ -11,10 +13,17 @@ ONTOLOGY = Path(__file__).resolve().parents[1] / "knowledge/reassemble_actions.t
 
 def query_transitions():
     '''Collect positive KnowRob answers for the four actions.'''
+    flags = sys.getdlopenflags() if hasattr(sys, "getdlopenflags") and hasattr(os, "RTLD_GLOBAL") else None
     try:
+        if flags is not None:
+            # SWI-Prolog loads RDF and socket extensions after KnowRob has been imported.
+            sys.setdlopenflags(flags | os.RTLD_GLOBAL)
         import knowrob
     except ImportError as exc:
         raise RuntimeError("Run the exporter with a Python interpreter that can import KnowRob 2") from exc
+    finally:
+        if flags is not None:
+            sys.setdlopenflags(flags)
 
     settings = {
         "semantic-web": {"prefixes": [{"alias": "reassemble", "uri": NAMESPACE.rstrip("#")}]},
