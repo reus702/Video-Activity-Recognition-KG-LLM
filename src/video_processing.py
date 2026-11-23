@@ -1,6 +1,30 @@
 import cv2
 import numpy as np
 
+
+def read_sampled_frames(video_path, indices):
+    '''Read saved frame indices in order with a single video seek.'''
+    indices = tuple(indices)
+    if not indices or indices[0] < 0 or any(a >= b for a, b in zip(indices, indices[1:])):
+        raise ValueError("Expected increasing, nonnegative frame indices")
+    capture = cv2.VideoCapture(str(video_path))
+    try:
+        if not capture.isOpened() or not capture.set(cv2.CAP_PROP_POS_FRAMES, indices[0]):
+            raise ValueError(f"Cannot seek to frame {indices[0]} in {video_path}")
+        frames = []
+        for index in range(indices[0], indices[-1] + 1):
+            if not capture.grab():
+                raise ValueError(f"Cannot read frame {index} in {video_path}")
+            if index == indices[len(frames)]:
+                ok, frame = capture.retrieve()
+                if not ok:
+                    raise ValueError(f"Cannot decode frame {index} in {video_path}")
+                frames.append(frame)
+        return frames
+    finally:
+        capture.release()
+
+
 def iter_clips( video_path, window_sec=3.0, stride_sec=1.5, num_frames=16 ):
     '''
     Yield sampled BGR frames from sliding windows with relative video times.

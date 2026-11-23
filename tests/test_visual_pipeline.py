@@ -20,6 +20,7 @@ from src.inspection import detection_rows, load_embedding, load_recordings
 from src.labeling import OverlappingSegmentsError, load_annotations
 from src.prototype_classifier import PrototypeClassifier
 from src.reassemble import load_reassemble_plan, prepare_reassemble
+from src.video_processing import iter_clips, read_sampled_frames
 
 
 class VisualPipelineTests(unittest.TestCase):
@@ -208,6 +209,13 @@ class VisualPipelineTests(unittest.TestCase):
         with self.assertRaises(FileExistsError):
             extract_video(self.h5, self.root / "videos")
         self.assertEqual(video.read_bytes(), original)
+
+    def test_training_reads_original_sampled_frames(self):
+        video = self.root / "input.mp4"
+        for clip in iter_clips(video):
+            np.testing.assert_array_equal(
+                read_sampled_frames(video, clip["sampled_frame_indices"]), clip["frames"]
+            )
 
     def test_optional_detections(self):
         '''

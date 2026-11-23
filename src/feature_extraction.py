@@ -8,6 +8,17 @@ from torchvision.models.video import (
     R2Plus1D_18_Weights
 )
 
+
+VIDEO_WEIGHTS = R2Plus1D_18_Weights.KINETICS400_V1
+
+
+def preprocess_frames(frames, transform):
+    '''Convert sampled BGR frames to the encoder's RGB input tensor.'''
+    rgb_frames = [cv2.cvtColor(frame, cv2.COLOR_BGR2RGB) for frame in frames]
+    video = torch.from_numpy(np.stack(rgb_frames)).permute(0, 3, 1, 2)
+    return transform(video)
+
+
 class VideoFeatureExtractor:
 
     def __init__(self, device=None):
@@ -20,11 +31,8 @@ class VideoFeatureExtractor:
             else "cpu"
         )
 
-        weights = R2Plus1D_18_Weights.KINETICS400_V1
-
-        self.preprocess = weights.transforms()
-
-        self.model = r2plus1d_18(weights=weights)
+        self.preprocess = VIDEO_WEIGHTS.transforms()
+        self.model = r2plus1d_18(weights=VIDEO_WEIGHTS)
 
         # Remove the Kinetics-400 classification layer.
         self.model.fc = nn.Identity()
@@ -41,24 +49,8 @@ class VideoFeatureExtractor:
         Convert BGR frames to RGB and return a 512-dimensional NumPy embedding.
         '''
 
-        rgb_frames = [
-            cv2.cvtColor(f, cv2.COLOR_BGR2RGB)
-            for f in frames
-        ]
-
-        # T, H, W, C
-        video = np.stack(rgb_frames)
-
-        # T, C, H, W
-        video = torch.from_numpy(video).permute(
-            0, 3, 1, 2
-        )
-
-        # Apply the preprocessing supplied with the pretrained weights.
-        video = self.preprocess(video)
-
         # B, C, T, H, W
-        video = video.unsqueeze(0).to(self.device)
+        video = preprocess_frames(frames, self.preprocess).unsqueeze(0).to(self.device)
 
         embedding = self.model(video)
 

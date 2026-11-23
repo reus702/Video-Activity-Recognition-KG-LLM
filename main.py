@@ -34,12 +34,15 @@ def main():
     if command == "evaluate-knowrob":
         evaluate_knowrob_main()
         return
+    if command == "train-visual":
+        train_visual_main()
+        return
     if command in ("prepare-experiment", "evaluate-experiment"):
         experiment_main()
         return
     parser = argparse.ArgumentParser(
         description="Prepare the visual baseline dataset",
-        epilog="Commands: prepare-reassemble, prepare-experiment, evaluate-experiment, evaluate-knowrob")
+        epilog="Commands: prepare-reassemble, prepare-experiment, evaluate-experiment, evaluate-knowrob, train-visual")
     inputs = parser.add_mutually_exclusive_group()
     inputs.add_argument("--raw-dir", type=Path, default=RAW_DIR)
     inputs.add_argument("--dataset-plan", type=Path, help="Read only the selected REASSEMBLE recordings")
@@ -139,6 +142,41 @@ def main():
     report_path = output_dir / f"dataset_report_{stamp}.json"
     write_json(report_path, report)
     print(f"Report: {report_path} ({report['recording_count']} recordings, {report['clip_count']} clips)")
+
+
+def train_visual_main():
+    '''Start a supervised RGB fine-tuning run on an existing recording split.'''
+    def clip_selection(value):
+        if value == "all":
+            return value
+        try:
+            count = int(value)
+        except ValueError:
+            raise argparse.ArgumentTypeError("Expected a positive integer or 'all'") from None
+        if count < 1:
+            raise argparse.ArgumentTypeError("Expected a positive integer or 'all'")
+        return count
+
+    parser = argparse.ArgumentParser(description="Fine-tune the last R(2+1)D block on REASSEMBLE RGB clips")
+    parser.add_argument("--plan-file", type=Path, required=True, help="Existing visual experiment plan")
+    parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--train-shots", type=clip_selection, default=32,
+                        help="Training segments per class, or 'all' to use every labeled window")
+    parser.add_argument("--validation-shots", type=clip_selection, default=16,
+                        help="Validation segments per class, or 'all' to use every labeled window")
+    parser.add_argument("--epochs", type=int, default=3)
+    parser.add_argument("--batch-size", type=int, default=4)
+    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--learning-rate", type=float, default=1e-4)
+    args = parser.parse_args(sys.argv[2:])
+
+    from src.video_training import train_visual
+
+    summary = train_visual(args.plan_file, args.output_dir, args.train_shots, args.validation_shots,
+                           args.epochs, args.batch_size, args.seed, args.learning_rate)
+    print("Best validation Macro-F1:", summary["metrics"]["macro_f1"])
+    print("Frozen prototype Macro-F1:", summary["frozen_prototype_metrics"]["macro_f1"])
+    print("Saved:", args.output_dir / "summary.json")
 
 
 def prepare_reassemble_main():

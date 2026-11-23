@@ -238,3 +238,30 @@ See `docs/KNOWROB_BASELINE.md` for the export and evaluation commands.
   25.16% Macro-F1, and 80.42% vs 81.56% Top-3 Accuracy. PLACE F1 remained
   near 16.33%. There were 3,130 corrections and 3,084 regressions across
   the seeds. See `outputs/experiments/reassemble_10shot_knowrob_validation/summary.json`.
+
+## Supervised RGB fine-tuning — 2026-11-21
+
+- `train-visual` reuses the recording split from an existing experiment plan
+  and takes one central eligible window per sampled segment. It reads the
+  original sampled RGB frames from the saved videos. The layers before
+  `layer4` of the Kinetics-400 R(2+1)D backbone stay frozen. Training updates `layer4` and a
+  new classification head, and saves the checkpoint with the best validation
+  Macro-F1. Test recordings remain held out.
+- The previous pilot used 32 training and 16 validation segments per class,
+  for 128 training and 64 validation clips. It used seed 0, batch size 4 and
+  three epochs on an NVIDIA GeForce GTX 1660 SUPER. About 65 seconds elapsed
+  between saving the configuration and the final artifacts, after initial
+  setup. Epoch 2 gave 59.38% accuracy and 57.54% Macro-F1. The frozen
+  Prototype Classifier on the same clips gave 40.63% and 36.48%, respectively.
+  The pilot used one seed and a small balanced validation sample. Its outputs
+  are in `outputs/experiments/reassemble_rgb_finetune_pilot/`.
+- The restored trainer passed all 20 unit tests and a one-epoch CUDA run on
+  eight real training clips and eight real validation clips. The temporary
+  run verified checkpoint and prediction output.
+- `--train-shots all --validation-shots all` selects every eligible labeled window.
+  A check against the saved REASSEMBLE plan verified 12,529 training windows
+  across 81 recordings and 2,895 validation windows across 20 recordings.
+  The 36 retained official test recordings are held out. All 20 unit tests
+  passed after adding the full-window selection. The full run is pending.
+
+See `docs/FEW_SHOT_BASELINE.md` for the PowerShell command and output files.

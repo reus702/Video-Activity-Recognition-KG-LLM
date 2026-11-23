@@ -138,6 +138,44 @@ Newly added recordings do not silently alter an existing plan. Interrupted resul
 folders are not resumed automatically. Plans store an absolute input root; prepare
 a new experiment after relocating the data.
 
+## Supervised RGB fine-tuning
+
+Run from the repository root in PowerShell with a new output directory.
+The input is the visual experiment plan created by `prepare-experiment`.
+
+```powershell
+.\.venv\Scripts\python.exe main.py train-visual `
+  --plan-file outputs/experiments/reassemble_10shot_raw_10seeds/plan.json `
+  --output-dir outputs/experiments/reassemble_rgb_finetune_run `
+  --train-shots 32 --validation-shots 16 --epochs 3 --batch-size 4 `
+  --seed 0 --learning-rate 0.0001
+```
+
+Each shot is one distinct labeled segment from the specified partition. The
+trainer takes one central eligible clip from each selected segment and reads
+its original sampled RGB frames from the saved MP4. The plan provides the
+recording split. The training seed controls segment selection, head
+initialization and batch shuffling. With the same plan and validation shot
+count, the validation clips stay fixed across training runs. Test recordings
+are held out.
+
+For a run on every eligible window, set `--train-shots all --validation-shots all`.
+With the REASSEMBLE plan above, this uses 12,529 training windows and 2,895
+validation windows from the 101 retained official training recordings.
+The 36 retained official test recordings stay held out. The full-window mode
+preserves the observed class frequencies, including multiple windows from a
+segment. Use a new output directory for the full run.
+
+Training starts from Kinetics-400 weights and updates the last R(2+1)D residual
+block and a new action classification head. The head uses ten times the
+configured learning rate. The run also scores the existing frozen embeddings
+with the raw Prototype Classifier on exactly the same clips.
+
+`run.json` records the configuration, input fingerprints and selected clips.
+`epoch_*.json` records loss and validation metrics. `checkpoint.pt` and
+`validation_predictions.json` correspond to the epoch with the highest
+validation Macro-F1. Compare both visual methods in `summary.json`.
+
 ## Tests
 
 ```sh
