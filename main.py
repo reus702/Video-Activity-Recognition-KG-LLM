@@ -170,6 +170,7 @@ def train_visual_main():
     parser.add_argument("--learning-rate", type=float, default=1e-4)
     args = parser.parse_args(sys.argv[2:])
 
+    print("Starting train-visual | loading PyTorch and training modules...", flush=True)
     from src.video_training import train_visual
 
     summary = train_visual(args.plan_file, args.output_dir, args.train_shots, args.validation_shots,

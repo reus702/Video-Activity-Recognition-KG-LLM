@@ -171,6 +171,11 @@ block and a new action classification head. The head uses ten times the
 configured learning rate. The run also scores the existing frozen embeddings
 with the raw Prototype Classifier on exactly the same clips.
 
+The terminal reports input preparation, the selected device, and the first,
+every 50th, and last batch of training and validation in each epoch. Each batch
+update shows the percentage, elapsed time, and estimated remaining time for
+that phase. The epoch summary reports loss and validation Macro-F1.
+
 `run.json` records the configuration, input fingerprints and selected clips.
 `epoch_*.json` records loss and validation metrics. `checkpoint.pt` and
 `validation_predictions.json` correspond to the epoch with the highest

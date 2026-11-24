@@ -1,6 +1,8 @@
 import json
 import math
+from datetime import timedelta
 from pathlib import Path
+from time import monotonic
 
 import numpy as np
 import torch
@@ -16,6 +18,18 @@ from src.inspection import load_embedding
 from src.prototype_classifier import PrototypeClassifier
 from src.splitting import select_support
 from src.video_processing import read_sampled_frames
+
+
+def print_progress(stage, completed, total, started, every=50):
+    '''Report the first item, regular milestones and the end of each stage.'''
+    if completed != 1 and completed != total and completed % every != 0:
+        return
+    elapsed = monotonic() - started
+    fraction = completed / total
+    remaining = elapsed * (total - completed) / completed
+    print(f"{stage} {completed}/{total} ({fraction:.1%}) | "
+          f"elapsed {timedelta(seconds=round(elapsed))} | ETA {timedelta(seconds=round(remaining))}",
+          flush=True)
 
 
 def load_training_clips(plan):
@@ -86,13 +100,16 @@ class SavedVideoClips(Dataset):
 def frozen_comparison(plan, recordings, training, validation):
     '''Fit the frozen prototype control on the same examples as the trained model.'''
     vectors = {}
-    for clip in training + validation:
+    clips = training + validation
+    started = monotonic()
+    for index, clip in enumerate(clips, start=1):
         recording = recordings[clip["recording_id"]]
         directory = recording["directory"]
         expected = plan["snapshot"][directory.name]["embeddings"][clip["clip_id"]]
         if file_digest(directory / clip["embedding_path"]) != expected:
             raise ValueError(f"Frozen embedding changed: {clip['clip_id']}")
         vectors[clip["clip_id"]] = load_embedding(recording, clip)
+        print_progress("Setup | frozen embeddings", index, len(clips), started, every=1000)
     classifier = PrototypeClassifier()
     classifier.fit(np.stack([vectors[clip["clip_id"]] for clip in training]),
                    [clip["ground_truth"] for clip in training])
@@ -103,15 +120,18 @@ def frozen_comparison(plan, recordings, training, validation):
 
 
 @torch.inference_mode()
-def validate_model(model, loader, criterion, classes, device):
+def validate_model(model, loader, criterion, classes, device, stage="Validation"):
     '''Score the fixed validation windows in their saved order.'''
     model.eval()
     loss = 0.0
     scores = []
-    for frames, labels in loader:
+    print(f"{stage} | starting {len(loader)} batches", flush=True)
+    started = monotonic()
+    for step, (frames, labels) in enumerate(loader, start=1):
         logits = model(frames.to(device))
         loss += criterion(logits, labels.to(device)).item() * len(labels)
         scores.extend(logits.softmax(dim=1).cpu().numpy())
+        print_progress(f"{stage} batch", step, len(loader), started)
     predictions = []
     for clip, probabilities in zip(loader.dataset.clips, scores, strict=True):
         ranking = np.argsort(-probabilities, kind="stable")
@@ -124,6 +144,7 @@ def validate_model(model, loader, criterion, classes, device):
 def train_visual(plan_path, output_dir, train_shots=32, validation_shots=16, epochs=3,
                  batch_size=4, seed=0, learning_rate=1e-4):
     '''Fine-tune the last R(2+1)D block and the action head on labeled support videos.'''
+    run_started = monotonic()
     if min(epochs, batch_size) < 1 or seed < 0:
         raise ValueError("Use positive epoch and batch counts and a nonnegative seed")
     if not math.isfinite(learning_rate) or learning_rate <= 0:
@@ -131,6 +152,7 @@ def train_visual(plan_path, output_dir, train_shots=32, validation_shots=16, epo
     plan_path, output_dir = Path(plan_path), Path(output_dir)
     if output_dir.exists():
         raise FileExistsError(f"Training output already exists: {output_dir}")
+    print(f"Setup | reading split and clip metadata from {plan_path}", flush=True)
     plan = json.loads(plan_path.read_text(encoding="utf-8"))
     classes = plan["classes"]
     recordings, clips = load_training_clips(plan)
@@ -138,15 +160,25 @@ def train_visual(plan_path, output_dir, train_shots=32, validation_shots=16, epo
     # Keep validation clip selection fixed across training seeds.
     validation = select_training_clips(clips, plan["split"]["validation"], classes,
                                        validation_shots, plan["split_seed"])
+    print(f"Setup | selected {len(training)} training clips and {len(validation)} validation clips",
+          flush=True)
     videos = {}
     for recording_id in sorted({clip["recording_id"] for clip in training + validation}):
         directory = recordings[recording_id]["directory"]
         videos[recording_id] = directory / f"{directory.name}.mp4"
-    video_hashes = {recording_id: file_digest(path) for recording_id, path in videos.items()}
+    print(f"Setup | fingerprinting {len(videos)} source videos", flush=True)
+    video_hashes = {}
+    started = monotonic()
+    for index, (recording_id, path) in enumerate(videos.items(), start=1):
+        video_hashes[recording_id] = file_digest(path)
+        print_progress("Setup | video", index, len(videos), started, every=10)
+    print("Setup | verifying saved embeddings for the frozen prototype comparison", flush=True)
     baseline = frozen_comparison(plan, recordings, training, validation)
 
     torch.manual_seed(seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device_name = torch.cuda.get_device_name(device) if device.type == "cuda" else "CPU"
+    print(f"Setup | loading pretrained R(2+1)D on {device_name}", flush=True)
     train_loader = DataLoader(SavedVideoClips(training, videos, classes), batch_size=batch_size,
                               shuffle=True, generator=torch.Generator().manual_seed(seed))
     validation_loader = DataLoader(SavedVideoClips(validation, videos, classes), batch_size=batch_size)
@@ -159,6 +191,7 @@ def train_visual(plan_path, output_dir, train_shots=32, validation_shots=16, epo
     optimizer = torch.optim.AdamW([{"params": model.layer4.parameters(), "lr": learning_rate},
                                    {"params": model.fc.parameters(), "lr": learning_rate * 10}])
     output_dir.mkdir(parents=True)
+    print(f"Setup | saving run configuration to {output_dir}", flush=True)
     write_json(output_dir / "run.json", {
         "source_plan": str(plan_path.resolve()), "source_plan_sha256": file_digest(plan_path),
         "weights": str(VIDEO_WEIGHTS), "torch_version": str(torch.__version__), "device": str(device),
@@ -175,10 +208,13 @@ def train_visual(plan_path, output_dir, train_shots=32, validation_shots=16, epo
 
     best_epoch, best_metrics, best_predictions, best_weights = None, None, None, None
     for epoch in range(1, epochs + 1):
+        stage = f"Epoch {epoch}/{epochs}"
+        print(f"{stage} | starting training ({len(train_loader)} batches)", flush=True)
         model.eval()  # Keep frozen backbone batch-normalization statistics unchanged.
         model.layer4.train()
         model.fc.train()
         loss = 0.0
+        started = monotonic()
         for step, (frames, labels) in enumerate(train_loader, start=1):
             optimizer.zero_grad(set_to_none=True)
             step_loss = criterion(model(frames.to(device)), labels.to(device))
@@ -187,25 +223,27 @@ def train_visual(plan_path, output_dir, train_shots=32, validation_shots=16, epo
             step_loss.backward()
             optimizer.step()
             loss += step_loss.item() * len(labels)
-            if step % 250 == 0:
-                print(f"Epoch {epoch}/{epochs} | training batch {step}/{len(train_loader)}", flush=True)
+            print_progress(f"{stage} | training batch", step, len(train_loader), started)
         training_loss = loss / len(training)
         validation_loss, metrics, predictions = validate_model(
-            model, validation_loader, criterion, classes, device)
+            model, validation_loader, criterion, classes, device, stage=f"{stage} | validation")
         write_json(output_dir / f"epoch_{epoch:02d}.json", {
             "epoch": epoch, "training_loss": training_loss, "validation_loss": validation_loss,
             "metrics": metrics,
         })
-        print(f"Epoch {epoch}/{epochs} | train loss {training_loss:.4f} | "
+        print(f"{stage} | train loss {training_loss:.4f} | "
               f"val loss {validation_loss:.4f} | val Macro-F1 {metrics['macro_f1']:.4f}", flush=True)
         if best_metrics is None or metrics["macro_f1"] > best_metrics["macro_f1"]:
             best_epoch, best_metrics, best_predictions = epoch, metrics, predictions
             best_weights = {name: weight.detach().cpu().clone() for name, weight in model.state_dict().items()}
 
+    print(f"Saving checkpoint from epoch {best_epoch} and validation results to {output_dir}",
+          flush=True)
     with (output_dir / "checkpoint.pt").open("xb") as stream:
         torch.save({"model_state_dict": best_weights, "classes": classes, "epoch": best_epoch}, stream)
     write_json(output_dir / "validation_predictions.json", best_predictions)
     summary = {"best_epoch": best_epoch, "metrics": best_metrics, "frozen_prototype_metrics": baseline,
                "train_clip_count": len(training), "validation_clip_count": len(validation), "complete": True}
     write_json(output_dir / "summary.json", summary)
+    print(f"Run complete | elapsed {timedelta(seconds=round(monotonic() - run_started))}", flush=True)
     return summary

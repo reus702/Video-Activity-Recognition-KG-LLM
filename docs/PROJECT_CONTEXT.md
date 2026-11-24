@@ -265,3 +265,12 @@ See `docs/KNOWROB_BASELINE.md` for the export and evaluation commands.
   passed after adding the full-window selection. The full run is pending.
 
 See `docs/FEW_SHOT_BASELINE.md` for the PowerShell command and output files.
+
+## Training progress reporting — 2026-11-23
+
+- `train-visual` reports input preparation, device selection, training and
+  validation batch progress, and checkpoint saving. Batch progress shows
+  elapsed and estimated remaining time for the current phase.
+- All 20 unit tests passed. A temporary CLI smoke test used real saved
+  clips and a small stand-in model on CPU to verify the progress messages
+  and output files.
