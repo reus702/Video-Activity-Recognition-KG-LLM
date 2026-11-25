@@ -262,7 +262,7 @@ See `docs/KNOWROB_BASELINE.md` for the export and evaluation commands.
   A check against the saved REASSEMBLE plan verified 12,529 training windows
   across 81 recordings and 2,895 validation windows across 20 recordings.
   The 36 retained official test recordings are held out. All 20 unit tests
-  passed after adding the full-window selection. The full run is pending.
+  passed after adding the full-window selection.
 
 See `docs/FEW_SHOT_BASELINE.md` for the PowerShell command and output files.
 
@@ -274,3 +274,74 @@ See `docs/FEW_SHOT_BASELINE.md` for the PowerShell command and output files.
 - All 20 unit tests passed. A temporary CLI smoke test used real saved
   clips and a small stand-in model on CPU to verify the progress messages
   and output files.
+
+## Full-window RGB fine-tuning results — 2026-11-25
+
+- Verified the completed CUDA run in
+  `outputs/experiments/reassemble_rgb_finetune_full/` with 12,529 training
+  and 2,895 validation windows. The run used seed 0, batch size 4 and three
+  epochs. AdamW used learning rates of 0.0001 for `layer4` and 0.001 for
+  the new classification head.
+- Epoch 1 had the best validation Macro-F1 (68.86%), with 70.67% accuracy
+  and 96.27% top-3 accuracy. The frozen Prototype Classifier evaluated on
+  the same train and validation windows gave 39.47%, 45.04%, and 86.42%,
+  respectively. Metrics were recomputed from the saved fine-tuned predictions.
+- INSERT and REMOVE accounted for 541 of the 849 top-1 errors in epoch 1.
+  The results use one seed and window-level validation. This run did not
+  evaluate the held-out test recordings.
+- The `reassemble_rgb_finetune_full_v2` comparison used the identical data,
+  seed and training settings with both learning rates halved. Its best
+  checkpoint (epoch 3) gave 69.65% Macro-F1, 54.10% REMOVE F1 and 70.33%
+  accuracy. The original checkpoint gave 68.86%, 59.12% and 70.67%,
+  respectively. The validation predictions reproduce both reports.
+- Use epoch 1 of `reassemble_rgb_finetune_full` as the visual baseline for
+  the next KnowRob experiment. The lower learning rates did not improve
+  Macro-F1 and REMOVE F1 together. The official test remains held out.
+
+## Fine-tuned predictions and KnowRob trace
+
+- `trace-knowrob` connects selected saved predictions from the fine-tuned
+  model to the existing KnowRob evidence JSON. It checks the source plan
+  and recording metadata before selecting the closest non-overlapping
+  predecessor. It uses the saved visual prediction of that predecessor.
+- Verified the command on three real validation windows using the existing
+  live KnowRob export. Both positive transitions applied once with the
+  demonstration bonus of 0.02. One window had no matching transition.
+  All three top-1 predictions stayed the same. All 20 unit tests passed.
+
+## Visual predictions for missing validation context
+
+- The 2,895 validation windows have 1,814 predecessors with saved predictions,
+  1,079 distinct predecessors without predictions, and two windows with no
+  predecessor. Predecessors are selected within each recording by frame
+  bounds, so they do not overlap the evaluated window.
+- `predict-context` generated all 1,079 missing predictions on CUDA using the
+  epoch 1 checkpoint. It preserves the original clip metadata and records
+  fingerprints of the checkpoint, source plan and baseline predictions.
+  The output is `outputs/experiments/reassemble_rgb_finetune_full/context_predictions.json`.
+  The output IDs, metadata, four-way score rankings and coverage were verified
+  against the full validation timelines. All 20 unit tests passed.
+
+## KnowRob rankings for full fine-tuned validation
+
+- `trace-knowrob --context-file` joins the saved visual predictions with the
+  additional predecessor predictions and applies the exported transitions.
+  Input fingerprints tie the context predictions to the original run.
+- Verified 2,895 before-and-after rankings in
+  `outputs/experiments/reassemble_rgb_finetune_full/knowrob_rankings.json`.
+  The 0.02 bonus applied to 431 windows for PICK to INSERT and 978 windows
+  for REMOVE to PLACE. Two windows had no predecessor. All 20 unit tests passed.
+
+## Static KnowRob transitions on full fine-tuned validation
+
+- `compare-knowrob` compares both rankings on the same windows. The output
+  is `outputs/experiments/reassemble_rgb_finetune_full/knowrob_metrics.json`.
+  The visual metrics match the epoch 1 training summary.
+- With a 0.02 score bonus, visual vs. KnowRob results were 70.67% vs. 70.64%
+  accuracy, 68.86% vs. 68.83% Macro-F1, 76.58% vs. 76.56% INSERT F1 and
+  59.12% vs. 59.03% REMOVE F1. There were zero corrections and one regression
+  in 2,895 windows. The PICK to INSERT transition changed a correct REMOVE
+  to INSERT in clip `2025-01-09-14-40-21_hama1_clip_0095`.
+- Keep epoch 1 visual-only as the reference. This comparison covers the two
+  exported static transitions, a single checkpoint and the validation split.
+  All 20 unit tests and a check of the change categories passed.

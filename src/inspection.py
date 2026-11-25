@@ -1,7 +1,20 @@
 import json
+from bisect import bisect_right
 from pathlib import Path
 
 import numpy as np
+
+
+def previous_clips(clips):
+    '''Find the latest non-overlapping predecessor within one recording.'''
+    ordered = sorted(clips, key=lambda clip: clip["end_frame_exclusive"])
+    ends = [clip["end_frame_exclusive"] for clip in ordered]
+    previous = {}
+    for clip in clips:
+        index = bisect_right(ends, clip["start_frame"]) - 1
+        if index >= 0:
+            previous[clip["clip_id"]] = ordered[index]
+    return previous
 
 
 def load_recordings(output_dir):

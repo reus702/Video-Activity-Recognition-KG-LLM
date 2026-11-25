@@ -32,13 +32,13 @@ def print_progress(stage, completed, total, started, every=50):
           flush=True)
 
 
-def load_training_clips(plan):
-    '''Load metadata from the support and validation recordings in a frozen plan.'''
+def load_training_clips(plan, partitions=("support", "validation")):
+    '''Load metadata from the requested recording partitions in a frozen plan.'''
     split = plan["split"]
     assigned = [recording for ids in split.values() for recording in ids]
     if len(assigned) != len(set(assigned)):
         raise ValueError("Recordings overlap across experiment partitions")
-    requested = set(split["support"]) | set(split["validation"])
+    requested = {recording for partition in partitions for recording in split[partition]}
     root = Path(plan["data_dir"])
     recordings, clips = {}, []
     for name, snapshot in plan["snapshot"].items():
@@ -61,7 +61,7 @@ def load_training_clips(plan):
         recordings[recording_id] = {"directory": directory, "manifest": manifest}
         clips.extend(saved_clips)
     if set(recordings) != requested:
-        raise ValueError("Saved recordings do not match the support and validation split")
+        raise ValueError("Saved recordings do not match the requested split partitions")
     return recordings, clips
 
 
@@ -82,10 +82,10 @@ def select_training_clips(clips, recording_ids, classes, shots, seed):
 class SavedVideoClips(Dataset):
     '''Decode the exact RGB samples used to create each clip's original embedding.'''
 
-    def __init__(self, selected, videos, classes):
+    def __init__(self, selected, videos, classes=None):
         self.clips = selected
         self.videos = videos
-        self.class_index = {label: index for index, label in enumerate(classes)}
+        self.class_index = {label: index for index, label in enumerate(classes)} if classes else None
         self.transform = VIDEO_WEIGHTS.transforms()
 
     def __len__(self):
@@ -94,7 +94,10 @@ class SavedVideoClips(Dataset):
     def __getitem__(self, index):
         clip = self.clips[index]
         frames = read_sampled_frames(self.videos[clip["recording_id"]], clip["sampled_frame_indices"])
-        return preprocess_frames(frames, self.transform), self.class_index[clip["ground_truth"]]
+        tensor = preprocess_frames(frames, self.transform)
+        if self.class_index is None:
+            return tensor
+        return tensor, self.class_index[clip["ground_truth"]]
 
 
 def frozen_comparison(plan, recordings, training, validation):
@@ -132,13 +135,19 @@ def validate_model(model, loader, criterion, classes, device, stage="Validation"
         loss += criterion(logits, labels.to(device)).item() * len(labels)
         scores.extend(logits.softmax(dim=1).cpu().numpy())
         print_progress(f"{stage} batch", step, len(loader), started)
+    predictions = rank_predictions(loader.dataset.clips, scores, classes)
+    return loss / len(predictions), classification_metrics(predictions, classes), predictions
+
+
+def rank_predictions(clips, scores, classes):
+    '''Attach a ranked list of class scores to each source window.'''
     predictions = []
-    for clip, probabilities in zip(loader.dataset.clips, scores, strict=True):
+    for clip, probabilities in zip(clips, scores, strict=True):
         ranking = np.argsort(-probabilities, kind="stable")
         predictions.append({**clip, "predicted_activity": classes[ranking[0]],
                             "candidates": [{"action": classes[index], "score": float(probabilities[index])}
                                            for index in ranking]})
-    return loss / len(predictions), classification_metrics(predictions, classes), predictions
+    return predictions
 
 
 def train_visual(plan_path, output_dir, train_shots=32, validation_shots=16, epochs=3,

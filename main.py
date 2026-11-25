@@ -34,15 +34,25 @@ def main():
     if command == "evaluate-knowrob":
         evaluate_knowrob_main()
         return
+    if command == "trace-knowrob":
+        trace_knowrob_main()
+        return
+    if command == "compare-knowrob":
+        compare_knowrob_main()
+        return
     if command == "train-visual":
         train_visual_main()
+        return
+    if command == "predict-context":
+        predict_context_main()
         return
     if command in ("prepare-experiment", "evaluate-experiment"):
         experiment_main()
         return
     parser = argparse.ArgumentParser(
         description="Prepare the visual baseline dataset",
-        epilog="Commands: prepare-reassemble, prepare-experiment, evaluate-experiment, evaluate-knowrob, train-visual")
+        epilog="Commands: prepare-reassemble, prepare-experiment, evaluate-experiment, "
+               "evaluate-knowrob, trace-knowrob, compare-knowrob, train-visual, predict-context")
     inputs = parser.add_mutually_exclusive_group()
     inputs.add_argument("--raw-dir", type=Path, default=RAW_DIR)
     inputs.add_argument("--dataset-plan", type=Path, help="Read only the selected REASSEMBLE recordings")
@@ -180,6 +190,20 @@ def train_visual_main():
     print("Saved:", args.output_dir / "summary.json")
 
 
+def predict_context_main():
+    '''Generate the missing visual predictions for validation context windows.'''
+    parser = argparse.ArgumentParser(description="Predict missing validation context with a saved checkpoint")
+    parser.add_argument("--run-dir", type=Path, required=True)
+    parser.add_argument("--output", type=Path, required=True)
+    args = parser.parse_args(sys.argv[2:])
+
+    print("Preparing validation context from the saved training run...", flush=True)
+    from src.video_inference import predict_validation_context
+
+    report = predict_validation_context(args.run_dir, args.output)
+    print(f"Saved {report['prediction_count']} context predictions to {args.output}")
+
+
 def prepare_reassemble_main():
     '''Validate the official dataset selection and write its plan.'''
     parser = argparse.ArgumentParser(description="Prepare a plan from the official REASSEMBLE split")
@@ -209,6 +233,53 @@ def evaluate_knowrob_main():
     print("KnowRob metrics:", summary["metrics"])
     print("Changes across seeds:", summary["changes_across_seeds"])
     print("Saved:", args.output_dir / "summary.json")
+
+
+def trace_knowrob_main():
+    '''Show which KnowRob evidence applies to fine-tuned predictions.'''
+    from src.knowrob_experiment import trace_finetuned_predictions
+
+    parser = argparse.ArgumentParser(description="Trace KnowRob evidence on fine-tuned validation clips")
+    parser.add_argument("--run-dir", type=Path, required=True)
+    parser.add_argument("--evidence-file", type=Path, required=True)
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--clip-id", nargs="+", help="Trace these clips instead of all of validation")
+    parser.add_argument("--context-file", type=Path, help="Predictions for missing validation predecessors")
+    parser.add_argument("--bonus", type=float, default=0.02)
+    args = parser.parse_args(sys.argv[2:])
+    if args.clip_id is None and args.context_file is None:
+        parser.error("provide --clip-id for a sample or --context-file for full validation")
+    report = trace_finetuned_predictions(args.run_dir, args.evidence_file, args.output,
+                                         args.clip_id, args.bonus, args.context_file)
+    print(f"Checkpoint epoch {report['checkpoint_epoch']} | bonus {report['bonus']} | "
+          f"{len(report['predictions'])} validation clips")
+    for row in report["predictions"] if args.clip_id else []:
+        print(f"{row['clip_id']} | previous {row['previous_visual_action'] or 'unknown'} | "
+              f"top-1 {row['visual_top1']} -> {row['predicted_activity']} | label {row['ground_truth']}")
+        supported = [candidate for candidate in row["candidates"] if candidate["knowrob_query"]]
+        for candidate in supported:
+            print(f"  {candidate['knowrob_query']} | "
+                  f"{candidate['visual_score']:.4f} -> {candidate['score']:.4f}")
+        if not supported:
+            print("  No matching KnowRob evidence")
+    print("Saved", args.output)
+
+
+def compare_knowrob_main():
+    '''Measure the effect of KnowRob on paired fine-tuned rankings.'''
+    from src.knowrob_experiment import compare_knowrob_rankings
+
+    parser = argparse.ArgumentParser(description="Compare the visual and KnowRob validation rankings")
+    parser.add_argument("--rankings-file", type=Path, required=True)
+    parser.add_argument("--output", type=Path, required=True)
+    args = parser.parse_args(sys.argv[2:])
+    result = compare_knowrob_rankings(args.rankings_file, args.output)
+    for label, key in (("Visual", "visual_metrics"), ("KnowRob", "knowrob_metrics")):
+        metrics = result[key]
+        class_f1 = " | ".join(f"{action} F1 {score:.2%}" for action, score in metrics["f1_by_class"].items())
+        print(f"{label} | Macro-F1 {metrics['macro_f1']:.2%} | {class_f1}")
+    print("Top-1 changes:", result["changes"])
+    print("Saved", args.output)
 
 
 def experiment_main():
