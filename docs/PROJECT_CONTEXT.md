@@ -374,3 +374,33 @@ See `docs/FEW_SHOT_BASELINE.md` for the PowerShell command and output files.
   historical 5-shot and 10-shot KnowRob experiments. Retained their
   configurations and metric summaries, including the first 5-shot test
   summary.
+
+## Wrist-camera RGB preparation and supervised training
+
+- `prepare-rgb --camera hand` extracts the wrist camera and its timestamps
+  from the original HDF5 files using the split and sampling settings of
+  the saved REASSEMBLE experiment. It writes the MP4 files, per-recording
+  metadata and a training plan with labeled window counts. Label alignment
+  uses the timestamps of the selected camera.
+- `train-visual --skip-prototype` consumes the RGB plan and trains from the
+  saved frame indices and labels. The optional frozen prototype comparison
+  remains available for plans with embeddings.
+- All 21 unit tests passed. A temporary smoke test used four real REASSEMBLE
+  recordings and one CUDA epoch on four training and four validation windows.
+  It produced the checkpoint and validation predictions without embeddings.
+
+See `docs/FEW_SHOT_BASELINE.md` for both PowerShell commands.
+
+## Full wrist-camera training results — 2026-11-26
+
+- The completed `reassemble_hand_finetune` run used 11,310 training and 2,589
+  validation windows. The `hand` and `hama1` runs used identical recording
+  assignments, seed, optimizer, and nominal clip sampling settings. The
+  median observed clip durations were 3.24 s for `hand` and 3.00 s for `hama1`.
+- The selected `hand` checkpoint is epoch 3. On each camera's full validation
+  set, `hand` vs. `hama1` gave 96.16% vs. 68.86% Macro-F1, 95.87% vs. 70.67%
+  accuracy, 96.70% vs. 76.58% INSERT F1, and 92.12% vs. 59.12% REMOVE F1.
+- In 1,304 one-to-one window pairs from the same recording and annotated
+  segment with at most 0.5 s difference at each endpoint, Macro-F1 was
+  96.16% for `hand` and 72.33% for `hama1`. INSERT/REMOVE confusions totaled
+  50 vs. 232. These are validation results for the two trained models.

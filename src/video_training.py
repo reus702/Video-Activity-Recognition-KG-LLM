@@ -80,7 +80,7 @@ def select_training_clips(clips, recording_ids, classes, shots, seed):
 
 
 class SavedVideoClips(Dataset):
-    '''Decode the exact RGB samples used to create each clip's original embedding.'''
+    '''Decode the RGB frames at each clip's saved sample indices.'''
 
     def __init__(self, selected, videos, classes=None):
         self.clips = selected
@@ -151,7 +151,7 @@ def rank_predictions(clips, scores, classes):
 
 
 def train_visual(plan_path, output_dir, train_shots=32, validation_shots=16, epochs=3,
-                 batch_size=4, seed=0, learning_rate=1e-4):
+                 batch_size=4, seed=0, learning_rate=1e-4, skip_prototype=False):
     '''Fine-tune the last R(2+1)D block and the action head on labeled support videos.'''
     run_started = monotonic()
     if min(epochs, batch_size) < 1 or seed < 0:
@@ -163,6 +163,8 @@ def train_visual(plan_path, output_dir, train_shots=32, validation_shots=16, epo
         raise FileExistsError(f"Training output already exists: {output_dir}")
     print(f"Setup | reading split and clip metadata from {plan_path}", flush=True)
     plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    if plan.get("input_type") == "rgb" and not skip_prototype:
+        raise ValueError("Use --skip-prototype with a plan created by prepare-rgb")
     classes = plan["classes"]
     recordings, clips = load_training_clips(plan)
     training = select_training_clips(clips, plan["split"]["support"], classes, train_shots, seed)
@@ -181,8 +183,10 @@ def train_visual(plan_path, output_dir, train_shots=32, validation_shots=16, epo
     for index, (recording_id, path) in enumerate(videos.items(), start=1):
         video_hashes[recording_id] = file_digest(path)
         print_progress("Setup | video", index, len(videos), started, every=10)
-    print("Setup | verifying saved embeddings for the frozen prototype comparison", flush=True)
-    baseline = frozen_comparison(plan, recordings, training, validation)
+    baseline = None
+    if not skip_prototype:
+        print("Setup | verifying saved embeddings for the frozen prototype comparison", flush=True)
+        baseline = frozen_comparison(plan, recordings, training, validation)
 
     torch.manual_seed(seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -205,6 +209,7 @@ def train_visual(plan_path, output_dir, train_shots=32, validation_shots=16, epo
         "source_plan": str(plan_path.resolve()), "source_plan_sha256": file_digest(plan_path),
         "weights": str(VIDEO_WEIGHTS), "torch_version": str(torch.__version__), "device": str(device),
         "trainable_layers": ["layer4", "fc"], "optimizer": "AdamW",
+        "compare_frozen_prototype": not skip_prototype,
         "batch_size": batch_size, "epochs": epochs, "seed": seed, "validation_seed": plan["split_seed"],
         "train_shots": train_shots, "validation_shots": validation_shots,
         "learning_rate": learning_rate, "head_learning_rate": learning_rate * 10,

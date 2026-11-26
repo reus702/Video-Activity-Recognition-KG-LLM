@@ -181,6 +181,36 @@ that phase. The epoch summary reports loss and validation Macro-F1.
 `validation_predictions.json` correspond to the epoch with the highest
 validation Macro-F1. Compare both visual methods in `summary.json`.
 
+## Train on the wrist camera with RGB and labels
+
+Run these commands from the repository root in PowerShell:
+
+```powershell
+.\.venv\Scripts\python.exe -u main.py prepare-rgb `
+  --plan-file outputs/experiments/reassemble_10shot_raw_10seeds/plan.json `
+  --camera hand --output-dir outputs/visual_reassemble_hand
+
+.\.venv\Scripts\python.exe -u main.py train-visual `
+  --plan-file outputs/visual_reassemble_hand/plan.json `
+  --output-dir outputs/experiments/reassemble_hand_finetune `
+  --skip-prototype --train-shots all --validation-shots all `
+  --epochs 3 --batch-size 4 --seed 0 --learning-rate 0.0001
+```
+
+`prepare-rgb` reads the original HDF5 recordings through the reference
+plan. It extracts the wrist camera MP4 and timestamp array, describes the
+same sampling policy as the reference, and labels the windows using the
+wrist camera timestamps. The output includes one `clips.json` and
+`manifest.json` per recording, plus `plan.json` with the inherited split,
+input fingerprints and labeled window counts per partition.
+
+`--skip-prototype` trains directly on the sampled RGB frames and labels.
+For this run, `frozen_prototype_metrics` is `null` in `summary.json`.
+Both commands require new output directories. The trainer uses support
+and validation recordings, with the test partition reserved for later
+evaluation. For a camera comparison, evaluate matching time intervals
+covered by both views.
+
 ## Tests
 
 ```sh

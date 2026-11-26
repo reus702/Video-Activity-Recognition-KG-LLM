@@ -20,7 +20,7 @@ from src.inspection import detection_rows, load_embedding, load_recordings
 from src.labeling import OverlappingSegmentsError, load_annotations
 from src.prototype_classifier import PrototypeClassifier
 from src.reassemble import load_reassemble_plan, prepare_reassemble
-from src.video_processing import iter_clips, read_sampled_frames
+from src.video_processing import iter_clip_metadata, iter_clips, read_sampled_frames
 
 
 class VisualPipelineTests(unittest.TestCase):
@@ -212,10 +212,41 @@ class VisualPipelineTests(unittest.TestCase):
 
     def test_training_reads_original_sampled_frames(self):
         video = self.root / "input.mp4"
-        for clip in iter_clips(video):
+        for clip, metadata in zip(iter_clips(video), iter_clip_metadata(10, 60), strict=True):
+            self.assertEqual({key: value for key, value in clip.items() if key != "frames"}, metadata)
             np.testing.assert_array_equal(
                 read_sampled_frames(video, clip["sampled_frame_indices"]), clip["frames"]
             )
+
+    def test_prepare_rgb_uses_selected_camera_and_saved_split(self):
+        with h5py.File(self.h5, "r+") as source:
+            source["hand"] = source["hama1"][()]
+            source["timestamps/hand"] = source["timestamps/hama1"][()] + 0.25
+        shutil.copyfile(self.h5, self.raw / "validation.h5")
+        shutil.copyfile(self.h5, self.raw / "test.h5")
+        split = {"support": ["recording"], "validation": ["validation"], "test": ["test"]}
+        source_plan = self.root / "source_plan.json"
+        source_plan.write_text(json.dumps({
+            "split": split, "split_seed": 42, "classes": ["PICK"],
+            "dataset_plan": {"dataset": "REASSEMBLE", "raw_dir": str(self.raw),
+                             "split": {"train": ["recording", "validation"], "test": ["test"]}},
+            "embedding_config": {"window_sec": 3.0, "stride_sec": 1.5, "num_frames": 16},
+        }))
+        output = self.root / "rgb"
+        args = ["main.py", "prepare-rgb", "--plan-file", str(source_plan),
+                "--camera", "hand", "--output-dir", str(output)]
+        with patch.object(sys, "argv", args), contextlib.redirect_stdout(io.StringIO()):
+            main.main()
+            with self.assertRaises(FileExistsError):
+                main.main()
+        plan = json.loads((output / "plan.json").read_text())
+        self.assertEqual(plan["split"], split)
+        self.assertEqual(plan["clip_counts"], {name: {"PICK": 3} for name in split})
+        clips = load_recordings(output)["recording_hand"]["clips"]
+        self.assertEqual(clips[0]["original_start_time"], 1000.25)
+        self.assertEqual(clips[0]["ground_truth"], "PICK")
+        self.assertNotIn("embedding_path", clips[0])
+        self.assertFalse((output / "recording_hand/embeddings").exists())
 
     def test_optional_detections(self):
         '''

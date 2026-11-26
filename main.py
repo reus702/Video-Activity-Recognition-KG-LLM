@@ -31,6 +31,9 @@ def main():
     if command == "prepare-reassemble":
         prepare_reassemble_main()
         return
+    if command == "prepare-rgb":
+        prepare_rgb_main()
+        return
     if command == "evaluate-knowrob":
         evaluate_knowrob_main()
         return
@@ -51,7 +54,7 @@ def main():
         return
     parser = argparse.ArgumentParser(
         description="Prepare the visual baseline dataset",
-        epilog="Commands: prepare-reassemble, prepare-experiment, evaluate-experiment, "
+        epilog="Commands: prepare-reassemble, prepare-rgb, prepare-experiment, evaluate-experiment, "
                "evaluate-knowrob, trace-knowrob, compare-knowrob, train-visual, predict-context")
     inputs = parser.add_mutually_exclusive_group()
     inputs.add_argument("--raw-dir", type=Path, default=RAW_DIR)
@@ -178,15 +181,19 @@ def train_visual_main():
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--learning-rate", type=float, default=1e-4)
+    parser.add_argument("--skip-prototype", action="store_true",
+                        help="Train on RGB without reading embeddings or fitting prototypes")
     args = parser.parse_args(sys.argv[2:])
 
     print("Starting train-visual | loading PyTorch and training modules...", flush=True)
     from src.video_training import train_visual
 
     summary = train_visual(args.plan_file, args.output_dir, args.train_shots, args.validation_shots,
-                           args.epochs, args.batch_size, args.seed, args.learning_rate)
+                           args.epochs, args.batch_size, args.seed, args.learning_rate,
+                           skip_prototype=args.skip_prototype)
     print("Best validation Macro-F1:", summary["metrics"]["macro_f1"])
-    print("Frozen prototype Macro-F1:", summary["frozen_prototype_metrics"]["macro_f1"])
+    if summary["frozen_prototype_metrics"] is not None:
+        print("Frozen prototype Macro-F1:", summary["frozen_prototype_metrics"]["macro_f1"])
     print("Saved:", args.output_dir / "summary.json")
 
 
@@ -202,6 +209,22 @@ def predict_context_main():
 
     report = predict_validation_context(args.run_dir, args.output)
     print(f"Saved {report['prediction_count']} context predictions to {args.output}")
+
+
+def prepare_rgb_main():
+    """Prepare a camera-specific RGB training plan from the saved recording split."""
+    from src.rgb_preparation import RGB_CAMERAS, prepare_rgb
+
+    parser = argparse.ArgumentParser(description="Extract REASSEMBLE RGB and prepare a training plan")
+    parser.add_argument("--plan-file", type=Path, required=True, help="Existing REASSEMBLE experiment plan")
+    parser.add_argument("--camera", choices=RGB_CAMERAS, required=True)
+    parser.add_argument("--output-dir", type=Path, required=True)
+    args = parser.parse_args(sys.argv[2:])
+    plan = prepare_rgb(args.plan_file, args.output_dir, args.camera)
+    for partition, counts in plan["clip_counts"].items():
+        print(f"{partition}: {len(plan['split'][partition])} recordings, {sum(counts.values())} labeled clips",
+              counts)
+    print("Saved:", args.output_dir / "plan.json")
 
 
 def prepare_reassemble_main():
