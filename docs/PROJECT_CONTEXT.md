@@ -404,3 +404,46 @@ See `docs/FEW_SHOT_BASELINE.md` for both PowerShell commands.
   segment with at most 0.5 s difference at each endpoint, Macro-F1 was
   96.16% for `hand` and 72.33% for `hama1`. INSERT/REMOVE confusions totaled
   50 vs. 232. These are validation results for the two trained models.
+
+## Static KnowRob transitions on wrist-camera validation
+
+- Ran `predict-context`, `trace-knowrob` and `compare-knowrob` on the epoch 3
+  wrist-camera checkpoint and the same static evidence export used for
+  the `hama1` comparison. Inferred 1,039 missing predecessor predictions.
+- The 0.02 bonus applied to 1,025 of the 2,589 validation windows: 534 for
+  PICK to INSERT and 491 for REMOVE to PLACE. The full candidate order
+  changed in 651 windows. The top-1 prediction stayed the same in every
+  window, with zero corrections and zero regressions.
+- Both rankings gave 95.87% accuracy, 96.16% Macro-F1, 96.70% INSERT F1,
+  and 92.12% REMOVE F1. The paired report is
+  `outputs/experiments/reassemble_hand_finetune/knowrob_metrics.json`.
+
+- A score-gap audit of the 107 validation errors found that the two rules
+  support the true label in only four cases: one INSERT predicted as PICK
+  and three PLACE predicted as INSERT. The current rules cannot correct any
+  of the 77 INSERT/REMOVE confusions. The full error list is in
+  `outputs/experiments/reassemble_hand_finetune/hand_validation_errors.csv`.
+- An exploratory replay on the same validation scores gave one correction
+  and zero regressions at a bonus of 0.45 (96.20% Macro-F1). At 0.50,
+  it gave one correction and one regression (96.05% Macro-F1). This is
+  a sensitivity check on saved validation scores, with no bonus selected
+  from the sweep for held-out testing.
+
+## BNC state observability on wrist-camera validation
+
+- Reviewed eight windows from eight annotated BNC segments with the epoch 3
+  hand model. The sample includes two correct controls, four confusions on
+  successful attempts and two confusions on unsuccessful attempts.
+- In the four successful confusions, the decisive release or visible
+  separation appeared in the context after the model window. Clip 0058, for
+  example, showed the gripped BNC clearly separated from the fixed socket
+  about 0.7 s after the end of the window.
+- Aligned end-effector pose, finger positions, measured force and measured
+  torque with the original hand timestamps. Jaw opening with the piece left
+  behind and withdrawal with the jaws closed supported different readings.
+  Rotation and torque magnitude were present in both directions, including
+  unsuccessful attempts. The small selected sample does not establish a
+  state detector or measure a KnowRob gain.
+- The reproducible review and manual observations are in
+  `notebooks/bnc_state_inspection.ipynb`. The test split was held out. The
+  review used extra frames only to inspect events beyond the model windows.
