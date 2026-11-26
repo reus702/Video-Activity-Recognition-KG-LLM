@@ -3,6 +3,9 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+# macOS directory metadata
+.DS_Store
+
 # C extensions
 *.so
 
@@ -227,3 +230,5 @@ data/raw/reassemble*/
 
 */yolo11n.pt
 yolo11n.pt
+
+.DS_store

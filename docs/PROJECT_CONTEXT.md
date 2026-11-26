@@ -66,7 +66,7 @@ The second command is an alternative fresh run directory, not a required second 
 - `dataset_exploration.ipynb` and `video_embeddings.ipynb` now read completed outputs under `outputs/visual_baseline/`, with a selectable recording ID. Neither notebook extracts video, rewrites labels or runs an encoder/detector. No references to legacy JSON, legacy embeddings or `data/videos/` remain in these two notebooks.
 - `src/inspection.py` provides shared metadata/embedding loading and optional detection flattening. Embedding paths are resolved relative to each recording directory. Dataset exploration shows window/segment coverage, validates saved labels against original annotations in memory, and previews a sampled frame with any matching stored boxes. Embedding inspection validates vectors across recordings and shows exploratory neighbors, not evaluation metrics.
 - Existing `detections` schema is retained: per-frame relative video `timestamp`, then `objects` with `label`, `confidence`, pixel `bbox`. Empty or missing lists are supported. Annotation `object` is kept separate from detected labels. The notebooks display the manifest's YOLO flag, so disabled detection is not mistaken for evidence of object absence.
-- To populate detections later, enable `USE_YOLO` in `main.py` and use a fresh `--output-dir`; update notebook `OUTPUT_DIR` accordingly. Existing outputs are not enriched automatically. The baseline remains independent of YOLO and no detection inference was run in this update. The old `object_detection.ipynb` remains a separate legacy demo and still references `data/videos/`.
+- To populate detections later, enable `USE_YOLO` in `main.py` and use a fresh `--output-dir`; update notebook `OUTPUT_DIR` accordingly. Existing outputs are not enriched automatically. The baseline remains independent of YOLO and no detection inference was run in this update.
 - All code cells in both updated notebooks executed successfully against the current outputs from repository-root and notebooks working directories (plots checked with a noninteractive backend). Generated output sizes and modification times stayed unchanged. Notebook schemas validated. Six unit tests passed, including optional empty/populated detections and shared loading helpers.
 - The installed pandas cannot import with the current NumPy 1.26.4 (it requests NumPy >=2.0.2). These two notebooks use escaped HTML tables instead, without changing dependencies or the baseline environment.
 
@@ -232,7 +232,7 @@ See `docs/KNOWROB_BASELINE.md` for the export and evaluation commands.
   logs the upstream `plunit` diagnostic for `output(always)` at startup.
 - All 19 unit tests passed, including verification that the exporter restores
   the interpreter's original loader flags after the import.
-- The live evidence in `outputs/knowrob_transition_evidence.json` was used
+- The live evidence, retained in `outputs/knowrob_transition_evidence_guided.json`, was used
   with the default 0.02 bonus on the 2,895 validation windows and ten seeds.
   The visual and KnowRob runs gave 33.91% vs 34.07% Accuracy, 29.95% vs
   25.16% Macro-F1, and 80.42% vs 81.56% Top-3 Accuracy. PLACE F1 remained
@@ -345,3 +345,32 @@ See `docs/FEW_SHOT_BASELINE.md` for the PowerShell command and output files.
 - Keep epoch 1 visual-only as the reference. This comparison covers the two
   exported static transitions, a single checkpoint and the validation split.
   All 20 unit tests and a check of the change categories passed.
+
+## Qualitative inspection of INSERT and REMOVE — 2026-11-26
+
+- Reviewed ten selected validation clips with INSERT and REMOVE as the top
+  two visual candidates, including the KnowRob regression and controls with
+  correct visual predictions. Images in `outputs/inspection_insert_remove/`
+  show the saved 16 samples, additional frames around the window, and
+  selected 112-by-112 views reconstructed from encoder preprocessing.
+  `selection.json` preserves the clip IDs, timestamps and predictions.
+- In clips 0095, 0140 and 0036, the selected three-second window shows
+  approach or contact. A visible lift or extraction appears after the
+  window, in the frames shown at about 5.8, 6.4 and 3.6 seconds from its
+  start, respectively. The annotation continues past the window in each case.
+- In clip 0123 the Ethernet interaction is near the edge of the encoder
+  crop. In clip 0056 the D-SUB insertion attempt is annotated as failed.
+  The inspected frames show contact with little visible state change.
+  The selected sample illustrates timing and visibility issues and does
+  not estimate their prevalence in validation.
+
+## Workspace cleanup
+
+- Kept the active 10-shot experiment plan and validation inputs, the full
+  fine-tuning checkpoint and reports, the visual extraction, and the
+  canonical KnowRob export. Removed duplicate exports and traces, local
+  cache files, and the two standalone download and detection notebooks.
+- Removed the pilot and v2 weight files and the per-seed details of the
+  historical 5-shot and 10-shot KnowRob experiments. Retained their
+  configurations and metric summaries, including the first 5-shot test
+  summary.

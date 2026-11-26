@@ -14,7 +14,7 @@ and its Prolog backend available. From the repository root in that environment:
 
 ```sh
 python3 -c "import knowrob"
-python3 -m src.knowrob_queries --output outputs/knowrob_transition_evidence.json
+python3 -m src.knowrob_queries --output outputs/knowrob_transition_evidence_guided.json
 ```
 
 The exporter loads the Turtle ontology into KnowRob, queries all ordered pairs
@@ -22,6 +22,8 @@ of actions and records positive answers with the ontology fingerprint. The
 initial ontology is expected to yield two positive answers. The exporter
 reports an error when it cannot import KnowRob or receives no positive answers.
 Only the evidence JSON is needed back in the Windows workspace.
+Use the existing `outputs/knowrob_transition_evidence_guided.json` or choose
+a new output filename to export again.
 
 On Linux, the exporter loads the binding with global symbol visibility so the
 embedded SWI-Prolog runtime can resolve symbols when loading the RDF and socket
@@ -34,7 +36,7 @@ export finishes with `Saved 2 KnowRob answers` and exit code 0.
 ```powershell
 .\.venv\Scripts\python.exe main.py evaluate-knowrob `
   --experiment-dir outputs/experiments/reassemble_10shot_raw_10seeds `
-  --evidence-file outputs/knowrob_transition_evidence.json `
+  --evidence-file outputs/knowrob_transition_evidence_guided.json `
   --output-dir outputs/experiments/reassemble_10shot_knowrob_validation
 ```
 
@@ -52,6 +54,10 @@ predictions, corrections and regressions across the support seeds. Per-class
 F1 is under `visual_f1_by_class` and `f1_by_class`. Use a new output directory
 for each run.
 
+The historical KnowRob summary is retained. To reproduce its per-seed
+outputs, use the saved 10-shot validation inputs and a new KnowRob output
+directory.
+
 ## Trace the fine-tuned validation predictions
 
 The `trace-knowrob` command applies the exported static evidence to selected
@@ -66,7 +72,7 @@ From the repository root in PowerShell, using the existing KnowRob export:
 ```powershell
 .\.venv\Scripts\python.exe main.py trace-knowrob `
   --run-dir outputs/experiments/reassemble_rgb_finetune_full `
-  --evidence-file outputs/knowrob_transition_evidence.json `
+  --evidence-file outputs/knowrob_transition_evidence_guided.json `
   --output outputs/experiments/reassemble_rgb_knowrob_trial.json `
   --clip-id 2025-01-09-14-40-21_hama1_clip_0004 2025-01-09-14-40-21_hama1_clip_0014 2025-01-09-14-40-21_hama1_clip_0017
 ```
