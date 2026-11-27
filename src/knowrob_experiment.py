@@ -169,8 +169,58 @@ def trace_finetuned_predictions(run_dir, evidence_path, output_path, clip_ids=No
     return report
 
 
-def compare_knowrob_rankings(rankings_path, output_path):
-    '''Compare paired visual and reranked predictions from a validation trace.'''
+def audit_bnc_state_coverage(observations_path, rows, visual_metrics):
+    '''Report RGB opening coverage and the fallback with engagement unavailable.'''
+    observations_path = Path(observations_path)
+    report = json.loads(observations_path.read_text(encoding="utf-8"))
+    if report.get("method") != "wrist_rgb_jaw_template_matching_v1":
+        raise ValueError("Expected automatic RGB observations from observe-gripper")
+    expected = {}
+    for row in rows:
+        if row["camera"] != "hand":
+            raise ValueError("Expected wrist-camera rankings for the state audit")
+        for endpoint, slot in (("first", 0), ("last", -1)):
+            expected[row["clip_id"], endpoint] = (
+                row["recording_id"], row["segment_id"], row["camera"],
+                row["sampled_frame_indices"][slot], row["original_frame_times"][slot],
+            )
+
+    openings = {}
+    for observation in report["observations"]:
+        key = (observation["clip_id"], observation["endpoint"])
+        provenance = tuple(observation[field] for field in
+                           ("recording_id", "segment_id", "camera", "frame_index", "observed_at"))
+        if key in openings or expected.get(key) != provenance:
+            raise ValueError(f"RGB observation does not match its validation endpoint: {key}")
+        opening = observation["gripper_opening"]
+        if opening not in (None, "open", "closed") or "socket_engagement" in observation:
+            raise ValueError(f"Expected an opening-only RGB observation: {key}")
+        openings[key] = opening
+    if set(openings) != set(expected):
+        raise ValueError("RGB observations must cover the first and last endpoints of every ranked clip")
+
+    # The RGB opening estimator supplies no engagement observations. The audit
+    # reports the visual baseline as the fallback for every clip.
+    return {
+        "observations_file": str(observations_path),
+        "observations_sha256": file_digest(observations_path),
+        "source_plan_sha256": report["source_plan_sha256"],
+        "observed_endpoints": len(openings),
+        "endpoints_with_opening": sum(opening is not None for opening in openings.values()),
+        "clips_with_two_openings": sum(
+            openings[row["clip_id"], "first"] is not None
+            and openings[row["clip_id"], "last"] is not None for row in rows
+        ),
+        "clips_with_two_engagement_states": 0,
+        "rule_queries": 0,
+        "abstained_clips": len(rows),
+        "reason": "automatic_socket_engagement_unavailable",
+        "fallback_metrics": visual_metrics,
+    }
+
+
+def compare_knowrob_rankings(rankings_path, output_path, *, gripper_observations=None):
+    '''Compare visual and static rankings, with an optional audit of BNC state coverage.'''
     rankings_path, output_path = Path(rankings_path), Path(output_path)
     if output_path.exists():
         raise FileExistsError(f"KnowRob comparison already exists: {output_path}")
@@ -208,6 +258,26 @@ def compare_knowrob_rankings(rankings_path, output_path):
               "rankings_file": str(rankings_path), "rankings_sha256": file_digest(rankings_path),
               "bonus": report["bonus"], "visual_metrics": visual_metrics,
               "knowrob_metrics": knowrob_metrics, "changes": changes, "changed_clips": changed_clips}
+    if gripper_observations is not None:
+        result["static_coverage"] = {
+            "clips_with_bonus": sum(
+                any(candidate["knowledge_bonus"] > 0 for candidate in row["candidates"]) for row in rows
+            ),
+            "changed_candidate_order": sum(
+                [candidate["action"] for candidate in row["candidates"]]
+                != [candidate["action"] for candidate in row["visual_candidates"]] for row in rows
+            ),
+        }
+        result["state_coverage"] = audit_bnc_state_coverage(gripper_observations, rows, visual_metrics)
+        # Object annotations select a reporting stratum after the rankings are fixed.
+        bnc_indices = [index for index, row in enumerate(rows) if row.get("object") == "BNC"]
+        if bnc_indices:
+            bnc_visual = classification_metrics([visual[index] for index in bnc_indices], classes)
+            result["bnc_subset"] = {
+                "visual_metrics": bnc_visual,
+                "static_metrics": classification_metrics([rows[index] for index in bnc_indices], classes),
+                "state_fallback_metrics": bnc_visual,
+            }
     output_path.parent.mkdir(parents=True, exist_ok=True)
     write_json(output_path, result)
     return result

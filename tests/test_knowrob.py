@@ -10,11 +10,52 @@ import numpy as np
 
 from src.batch import write_json
 from src.experiment import file_digest
-from src.knowrob_experiment import evaluate_knowrob
+from src.knowrob_experiment import compare_knowrob_rankings, evaluate_knowrob
 from src.knowrob_queries import ACTIONS, query_transitions
 
 
 class KnowRobTests(unittest.TestCase):
+    def test_state_audit_keeps_visual_ranking_and_rejects_later_frames(self):
+        provenance = {"clip_id": "query", "recording_id": "r1", "segment_id": "2", "camera": "hand"}
+        visual = [{"action": "REMOVE", "score": .71}, {"action": "INSERT", "score": .70}]
+        static = [{"action": "INSERT", "score": .72, "knowledge_bonus": .02,
+                   "knowrob_query": "synthetic evidence"},
+                  {"action": "REMOVE", "score": .71, "knowledge_bonus": 0.0}]
+        row = {**provenance, "sampled_frame_indices": [10, 19], "original_frame_times": [1.0, 1.9],
+               "ground_truth": "INSERT", "object": "BNC", "visual_candidates": visual,
+               "candidates": static, "previous_clip_id": "prior", "previous_visual_action": "PICK"}
+        endpoints = [
+            {**provenance, "endpoint": "first", "frame_index": 10, "observed_at": 1.0,
+             "gripper_opening": "closed"},
+            {**provenance, "endpoint": "last", "frame_index": 19, "observed_at": 1.9,
+             "gripper_opening": "open"},
+        ]
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            rankings = root / "rankings.json"
+            observations = root / "opening.json"
+            write_json(rankings, {"partition": "validation", "classes": list(ACTIONS),
+                                  "checkpoint_epoch": 3, "bonus": .02, "predictions": [row]})
+            opening_report = {"method": "wrist_rgb_jaw_template_matching_v1",
+                              "source_plan_sha256": "synthetic", "observations": endpoints}
+            write_json(observations, opening_report)
+            result = compare_knowrob_rankings(rankings, root / "metrics.json",
+                                              gripper_observations=observations)
+            state = result["state_coverage"]
+            self.assertEqual(state["clips_with_two_openings"], 1)
+            self.assertEqual(state["rule_queries"], 0)
+            self.assertEqual(state["abstained_clips"], 1)
+            self.assertEqual(state["fallback_metrics"]["accuracy"], 0.0)
+            self.assertEqual(result["knowrob_metrics"]["accuracy"], 1.0)
+
+            endpoints[-1]["observed_at"] = 2.1
+            late = root / "late.json"
+            write_json(late, opening_report)
+            rejected_output = root / "rejected.json"
+            with self.assertRaisesRegex(ValueError, "does not match its validation endpoint"):
+                compare_knowrob_rankings(rankings, rejected_output, gripper_observations=late)
+            self.assertFalse(rejected_output.exists())
+
     def test_export_queries_knowrob(self):
         '''Export only positive answers returned by the KnowRob binding.'''
         class PositiveAnswer:

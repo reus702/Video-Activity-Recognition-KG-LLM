@@ -1,0 +1,76 @@
+@prefix reassemble: <https://example.org/reassemble/actions#> .
+@prefix observation: <https://example.org/reassemble/observations/bnc#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+# Retrospective context. Every frame in this file is after its clip window.
+
+observation:2025-01-09-18-08-36_hand_clip_0146_post a reassemble:BncSnapshot ;
+    reassemble:recordingId "2025-01-09-18-08-36" ;
+    reassemble:segmentId "19" ;
+    reassemble:clipId "2025-01-09-18-08-36_hand_clip_0146" ;
+    reassemble:frameIndex "6815"^^xsd:nonNegativeInteger ;
+    reassemble:observedAt "1736442763.0028684"^^xsd:double ;
+    reassemble:observedConnector reassemble:bnc ;
+    reassemble:observedSocket reassemble:bncSocket ;
+    reassemble:observedGripper reassemble:gripper ;
+    reassemble:socketEngagement reassemble:seated ;
+    reassemble:gripStatus reassemble:unheld ;
+    reassemble:gripperOpening reassemble:open ;
+    rdfs:comment "The open jaws have moved away and the connector remains on the board." .
+
+observation:2025-01-09-19-15-33_hand_clip_0285_post a reassemble:BncSnapshot ;
+    reassemble:recordingId "2025-01-09-19-15-33" ;
+    reassemble:segmentId "41" ;
+    reassemble:clipId "2025-01-09-19-15-33_hand_clip_0285" ;
+    reassemble:frameIndex "12959"^^xsd:nonNegativeInteger ;
+    reassemble:observedAt "1736447001.86369"^^xsd:double ;
+    reassemble:observedConnector reassemble:bnc ;
+    reassemble:observedSocket reassemble:bncSocket ;
+    reassemble:observedGripper reassemble:gripper ;
+    reassemble:socketEngagement reassemble:seated ;
+    reassemble:gripStatus reassemble:unheld ;
+    reassemble:gripperOpening reassemble:open ;
+    rdfs:comment "The jaws are open and the connector stays at the fixed socket." .
+
+observation:2025-01-13-11-01-25_hand_clip_0157_post a reassemble:BncSnapshot ;
+    reassemble:recordingId "2025-01-13-11-01-25" ;
+    reassemble:segmentId "36" ;
+    reassemble:clipId "2025-01-13-11-01-25_hand_clip_0157" ;
+    reassemble:frameIndex "7186"^^xsd:nonNegativeInteger ;
+    reassemble:observedAt "1736762737.2624023"^^xsd:double ;
+    reassemble:observedConnector reassemble:bnc ;
+    reassemble:observedSocket reassemble:bncSocket ;
+    reassemble:observedGripper reassemble:gripper ;
+    reassemble:socketEngagement reassemble:separated ;
+    reassemble:gripStatus reassemble:held ;
+    reassemble:gripperOpening reassemble:closed ;
+    rdfs:comment "A visible gap separates the connector in the jaws from the socket." .
+
+observation:2025-01-14-12-05-01_hand_clip_0058_post a reassemble:BncSnapshot ;
+    reassemble:recordingId "2025-01-14-12-05-01" ;
+    reassemble:segmentId "11" ;
+    reassemble:clipId "2025-01-14-12-05-01_hand_clip_0058" ;
+    reassemble:frameIndex "2719"^^xsd:nonNegativeInteger ;
+    reassemble:observedAt "1736852800.833335"^^xsd:double ;
+    reassemble:observedConnector reassemble:bnc ;
+    reassemble:observedSocket reassemble:bncSocket ;
+    reassemble:observedGripper reassemble:gripper ;
+    reassemble:socketEngagement reassemble:separated ;
+    reassemble:gripStatus reassemble:held ;
+    reassemble:gripperOpening reassemble:closed ;
+    rdfs:comment "The connector is still between the jaws and visibly clear of the socket." .
+
+observation:2025-01-09-14-40-21_hand_clip_0170_post a reassemble:BncSnapshot ;
+    reassemble:recordingId "2025-01-09-14-40-21" ;
+    reassemble:segmentId "31" ;
+    reassemble:clipId "2025-01-09-14-40-21_hand_clip_0170" ;
+    reassemble:frameIndex "7899"^^xsd:nonNegativeInteger ;
+    reassemble:observedAt "1736430307.172141"^^xsd:double ;
+    reassemble:observedConnector reassemble:bnc ;
+    reassemble:observedSocket reassemble:bncSocket ;
+    reassemble:observedGripper reassemble:gripper ;
+    reassemble:socketEngagement reassemble:seated ;
+    reassemble:gripStatus reassemble:unheld ;
+    reassemble:gripperOpening reassemble:open ;
+    rdfs:comment "The jaws are open and away from the connector, which appears to remain seated." .

@@ -1,0 +1,27 @@
+@prefix reassemble: <https://example.org/reassemble/actions#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+# Synthetic observations of a release. These IDs identify no dataset clips.
+reassemble:beforeRelease a reassemble:BncSnapshot ;
+    reassemble:recordingId "synthetic-recording" ;
+    reassemble:segmentId "synthetic-segment" ;
+    reassemble:clipId "synthetic-clip" ;
+    reassemble:observedAt "1.25"^^xsd:double ;
+    reassemble:observedConnector reassemble:bnc ;
+    reassemble:observedSocket reassemble:bncSocket ;
+    reassemble:observedGripper reassemble:gripper ;
+    reassemble:socketEngagement reassemble:seated ;
+    reassemble:gripStatus reassemble:held ;
+    reassemble:gripperOpening reassemble:closed .
+
+reassemble:afterRelease a reassemble:BncSnapshot ;
+    reassemble:recordingId "synthetic-recording" ;
+    reassemble:segmentId "synthetic-segment" ;
+    reassemble:clipId "synthetic-clip" ;
+    reassemble:observedAt "1.50"^^xsd:double ;
+    reassemble:observedConnector reassemble:bnc ;
+    reassemble:observedSocket reassemble:bncSocket ;
+    reassemble:observedGripper reassemble:gripper ;
+    reassemble:socketEngagement reassemble:seated ;
+    reassemble:gripStatus reassemble:unheld ;
+    reassemble:gripperOpening reassemble:open .

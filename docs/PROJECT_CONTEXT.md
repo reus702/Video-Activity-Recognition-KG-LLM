@@ -447,3 +447,198 @@ See `docs/FEW_SHOT_BASELINE.md` for both PowerShell commands.
 - The reproducible review and manual observations are in
   `notebooks/bnc_state_inspection.ipynb`. The test split was held out. The
   review used extra frames only to inspect events beyond the model windows.
+
+## BNC socket compatibility in KnowRob — 2026-11-27
+
+- The REASSEMBLE ontology declares `reassemble:bnc` as a connector and
+  `reassemble:bncSocket` as a socket, linked by `reassemble:compatibleSocket`
+  from connector to socket.
+- Verified with the KnowRob Python binding in the local `knowrob/ros1:latest`
+  container and the Prolog RDF backend. With `knowledge/reassemble_actions.ttl`
+  loaded, the query `reassemble:compatibleSocket(reassemble:bnc, Socket)`
+  returned `reassemble:bncSocket` from `answer.substitution().get("Socket")`.
+
+## SOMA-aligned BNC scene state — 2026-11-27
+
+- Added `knowledge/reassemble_bnc_state.ttl`, loaded with the application
+  ontology, SOMA and DUL in a single KnowRob knowledge base. A timestamped
+  DUL situation references the connector, socket and gripper. SOMA component
+  relations connect the socket to the workstation and the gripper to the arm.
+- Observations keep engagement, grip status and gripper opening independent.
+  A missing status represents an unknown observation. Snapshots can carry
+  the original recording, segment and clip IDs and camera timestamp.
+- The live Docker smoke check retrieved the five scene entities and verified
+  the change from held to unheld with the BNC still seated on two synthetic
+  snapshots. On macOS, all 21 unit tests passed with `TMPDIR=/private/tmp`.
+  See `docs/KNOWROB_BASELINE.md` for the live check.
+
+## Manual RGB BNC snapshots — 2026-11-27
+
+- Annotated the first and last sampled RGB frames of the eight validation
+  clips in the BNC notebook. The 16 in-window snapshots and five retrospective
+  snapshots are in `knowledge/observations/`. Each stores the source IDs,
+  frame index and exact wrist-camera timestamp.
+- At the sampled window endpoints, engagement is clear at the end of clip
+  0021, where the connector stays seated after release. The other 15 endpoints
+  omit engagement because the view is ambiguous. Four successful confusions
+  have clear later seating or separation. Clip 0170 also has a later view
+  with open jaws and the connector apparently seated.
+- The annotations use RGB only. The later frames and the manual labels are
+  reference data for inspection. Verified source IDs, partition membership,
+  frame indices and timestamps for all 21 snapshots. Live KnowRob queries
+  returned seated at the end of 0021 and separated after the window of 0058.
+
+## Historical BNC action evidence pilot — 2026-11-27
+
+- The former BNC-specific predicate mapped `separated → seated` to
+  INSERT evidence and `seated → separated` to REMOVE evidence. The caller
+  supplies ordered snapshots from the same evaluated window. The rule
+  checks the timestamps, provenance and compatible connector–socket pair.
+- Equal, missing or conflicting engagement values produce no action
+  evidence. An attempted action can leave the observed state unchanged.
+  The rule uses neither activity labels nor success annotations.
+- The live KnowRob smoke check returned both actions on synthetic pairs and
+  abstained for unchanged state, reversed times, different clips and
+  conflicting observations. It abstained on all eight manual in-window
+  pairs because none had two explicit engagement states. The retrospective
+  observations were excluded from the check. All 21 Python unit tests passed
+  with `TMPDIR=/private/tmp`.
+
+## Automatic wrist RGB observations — 2026-11-27
+
+- Added `observe-gripper` to estimate `open` or `closed` from the
+  relative positions of the jaws, with abstention for weak matches and
+  intermediate openings. The fixed-camera template and thresholds were
+  selected on four support recordings. Inference uses the saved first and
+  last sampled frame metadata and wrist RGB. The manual reference is read
+  only during comparison, in `notebooks/bnc_rgb_state_validation.ipynb`.
+- On the eight selected validation clips, all 16 opening estimates agreed
+  with the manual reference (15 closed, one open), including the opening
+  during 0021. All source IDs, frame indices and original timestamps
+  matched the reference. This is a targeted sample, with the test split
+  held out. The automatic output covers jaw opening. Grip status and
+  connector engagement remain undetermined by the estimator, so these
+  observations alone cannot supply evidence to the engagement rule.
+
+## Paired KnowRob validation and state coverage — 2026-11-27
+
+- Compared the epoch 3 visual and static KnowRob rankings on the same
+  2,589 wrist-camera validation windows from 20 recordings. Both gave
+  95.87% Accuracy, 96.16% Macro-F1 and 100% Top-3 Accuracy. The 0.02 static
+  bonus applied to 1,025 windows and changed the candidate order on 651,
+  with zero top-1 changes. On the 292 annotated BNC windows, both gave
+  90.41% Accuracy and 93.01% Macro-F1, with 26 INSERT/REMOVE confusions.
+- Ran the RGB opening estimator on all 5,178 saved endpoints and verified
+  matching clip IDs, frame indices and original timestamps. It assigned
+  opening on 3,745 endpoints (72.33%) and at both ends of 1,612 windows.
+  These counts measure coverage. The engagement rule had zero eligible
+  pairs, so the state arm made no queries and kept every visual ranking.
+- The state audit used only the automatic RGB output. The BNC annotation
+  was used for the evaluation slice. The test split stayed held out.
+  The report is `outputs/experiments/reassemble_hand_finetune/knowrob_state_audit.json`.
+  All 22 Python unit tests passed with `TMPDIR=/private/tmp`. See
+  `docs/KNOWROB_BASELINE.md` for reproducibility.
+
+## Proposed shared action and state model — 2026-11-27
+
+The BNC-specific action predicate was removed. Its scene facts and manual
+observations provide examples for the shared design. The two static
+`preferredSuccessor` relations still serve the static baseline. The live
+KnowRob check still retrieves the scene and the recorded engagement of
+clip 0021. All 22 Python unit tests passed.
+
+In the proposed model, each timestamped observation identifies the same
+physical piece across frames and records whether the gripper is empty,
+holding a piece, or unknown. The piece can be supported on a free surface,
+seated in a specific compatible assembly site, separated from that site,
+or of unknown relation to it. Gripper opening is an independent cue.
+An assembly site can be a socket, hole, axle or threaded mount.
+
+| Action | Proposed observable evidence |
+| --- | --- |
+| IDLE | No sustained manipulation or task-directed approach or retreat. An empty gripper can also occur during an active approach. |
+| PICK | The piece leaves a free support and moves with the gripper after it is grasped. |
+| PLACE | The gripper releases the piece and withdraws while the piece stays on a free support. |
+| INSERT | A held piece approaches a compatible assembly site and becomes seated. The gripper can still be holding it. |
+| REMOVE | A piece seated in an assembly site is grasped and leaves the site while moving with the gripper. Grasp alone is incomplete evidence. |
+
+The transitions describe visible outcomes. Approach, alignment and contact
+can support evidence of an attempt when the outcome is unchanged or
+unobservable. Missing evidence leaves the action unknown. The current
+four-class visual run excluded IDLE, whose REASSEMBLE annotation is
+`No action.`. Check annotated idle windows before adding a fifth class.
+
+1. Review before, during and after examples across the electrical
+   connectors, pegs, gears and threaded piece, including failed attempts
+   and ambiguous windows. Keep post-window evidence for manual review.
+2. Validate the shared observation vocabulary and action evidence on
+   manual examples, then implement rules parameterized by piece and site.
+3. Check RGB observability and abstention on windows from separate validation
+   recordings. Consider a detector for piece and site identity later.
+
+### Manual review across object families
+
+- `notebooks/reassemble_shared_state_review.ipynb` reviews seven wrist-camera
+  clips from three support recordings. It uses original timestamps and
+  identifies model samples, other in-window frames and retrospective context.
+- The small gear shows acquisition from a free surface in 0088 and release
+  in 0092. USB 0048 shows the piece staying at the receptacle after release
+  in context. For removal, the same criterion applies to BNC 0138 and
+  round peg 4 in 0042. The BNC is visibly separate in a later frame,
+  while full separation of the peg remains uncertain in the reviewed frames.
+- The threaded-piece example 0395 has an annotated failed INSERT and an
+  uncertain visible outcome. The IDLE example 0001 shows empty jaws while
+  the camera view moves across the board. All notebook code cells ran on
+  the saved RGB and timestamp files.
+
+### Shared catalog and observation schema
+
+- `knowledge/reassemble_manipulation_state.ttl` defines the common snapshot,
+  with separate relations to the gripper, free support and assembly site.
+  Missing observations remain unknown. `knowledge/reassemble_catalog.ttl`
+  maps all 17 exact object labels to their intended board sites.
+- The BNC pilot maps onto the shared vocabulary through subclass and
+  subproperty declarations. Its original observation IDs and timestamps
+  remain intact. The existing socket compatibility is available through
+  the generic `compatibleSite` query.
+- Verified all 17 label strings against the support metadata. The live
+  KnowRob check returned all 17 expected sites and read a real BNC snapshot
+  and a synthetic peg snapshot through the same properties. It also checked
+  a synthetic gear on a free support and the original BNC queries.
+  All 22 Python unit tests passed.
+
+### Generic action evidence
+
+- `knowledge/manipulation_evidence.pl` compares two observations and returns
+  the supported action, evidence kind and reason. PICK and PLACE use
+  changes in grip and free support. INSERT and REMOVE use grip and
+  engagement with a compatible site. BNC and pegs use the same predicate.
+- Added interval cues to the shared schema. Explicit inactivity can support
+  IDLE, and observed directed contact or pulling can support an INSERT or
+  REMOVE attempt without a confirmed outcome. Conflicting or incomplete
+  observations can yield abstention. Opening alone supplies no action evidence.
+- The live KnowRob check returned all five actions and both attempt types on
+  synthetic examples. It returned identical REMOVE evidence for BNC and
+  round peg 4. The real BNC clip 0021 still lacks an initial engagement
+  observation and returned no action evidence. Reversed times, different
+  clips, incompatible sites and contradictory states also yielded
+  abstention. All 22 Python unit tests passed.
+- Next, measure which of the required observations can be obtained from
+  RGB within the evaluated window before integrating rule evidence into
+  ranking. The visual experiment still has four classes.
+
+### Grip cue from RGB within the model window
+
+- `observe-gripper --motion-cues` adds a separate exploratory report for
+  adjacent saved wrist-camera samples. It uses closed-jaw estimates and
+  compares central texture with surrounding scene motion. It makes no
+  object, action or placement inference.
+- Reviewed 14 validation clips covering PICK, PLACE, INSERT and REMOVE.
+  The cue appeared on 22 of 210 sample pairs and in 7 of 14 clips. It
+  covered 3 of the 20 manually held endpoints and none of the six unheld
+  endpoints. Two additional endpoints had uncertain manual grip. Lack of a
+  cue leaves grip unknown. These counts come from a selected sample.
+- Verified each frame index and original timestamp against the frozen
+  samples in `notebooks/rgb_grip_motion_validation.ipynb`. Support and
+  engagement still need independent visual observations. The prototype
+  remains separate from the action rules and reranking.

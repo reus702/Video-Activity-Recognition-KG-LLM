@@ -49,13 +49,17 @@ def main():
     if command == "predict-context":
         predict_context_main()
         return
+    if command == "observe-gripper":
+        observe_gripper_main()
+        return
     if command in ("prepare-experiment", "evaluate-experiment"):
         experiment_main()
         return
     parser = argparse.ArgumentParser(
         description="Prepare the visual baseline dataset",
         epilog="Commands: prepare-reassemble, prepare-rgb, prepare-experiment, evaluate-experiment, "
-               "evaluate-knowrob, trace-knowrob, compare-knowrob, train-visual, predict-context")
+               "evaluate-knowrob, trace-knowrob, compare-knowrob, train-visual, predict-context, "
+               "observe-gripper")
     inputs = parser.add_mutually_exclusive_group()
     inputs.add_argument("--raw-dir", type=Path, default=RAW_DIR)
     inputs.add_argument("--dataset-plan", type=Path, help="Read only the selected REASSEMBLE recordings")
@@ -211,6 +215,30 @@ def predict_context_main():
     print(f"Saved {report['prediction_count']} context predictions to {args.output}")
 
 
+def observe_gripper_main():
+    """Save RGB-only gripper observations on selected validation windows."""
+    from src.rgb_gripper import observe_validation_gripper
+
+    parser = argparse.ArgumentParser(description="Estimate gripper opening from wrist RGB")
+    parser.add_argument("--plan-file", type=Path, required=True)
+    parser.add_argument("--clip-id", nargs="+", required=True)
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--motion-cues", action="store_true",
+                        help="Measure possible grip cues between adjacent saved samples")
+    args = parser.parse_args(sys.argv[2:])
+    if args.output.exists():
+        parser.error(f"Output already exists: {args.output}")
+    if args.motion_cues:
+        from src.rgb_grip_motion import observe_validation_grip_motion
+
+        report = observe_validation_grip_motion(args.plan_file, args.clip_id)
+    else:
+        report = observe_validation_gripper(args.plan_file, args.clip_id)
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    write_json(args.output, report)
+    print(f"Saved {len(report['observations'])} RGB observations to {args.output}")
+
+
 def prepare_rgb_main():
     """Prepare a camera-specific RGB training plan from the saved recording split."""
     from src.rgb_preparation import RGB_CAMERAS, prepare_rgb
@@ -294,14 +322,21 @@ def compare_knowrob_main():
 
     parser = argparse.ArgumentParser(description="Compare the visual and KnowRob validation rankings")
     parser.add_argument("--rankings-file", type=Path, required=True)
+    parser.add_argument("--gripper-observations", type=Path,
+                        help="Audit state evidence availability from paired wrist RGB observations")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(sys.argv[2:])
-    result = compare_knowrob_rankings(args.rankings_file, args.output)
+    result = compare_knowrob_rankings(args.rankings_file, args.output,
+                                      gripper_observations=args.gripper_observations)
     for label, key in (("Visual", "visual_metrics"), ("KnowRob", "knowrob_metrics")):
         metrics = result[key]
         class_f1 = " | ".join(f"{action} F1 {score:.2%}" for action, score in metrics["f1_by_class"].items())
         print(f"{label} | Macro-F1 {metrics['macro_f1']:.2%} | {class_f1}")
     print("Top-1 changes:", result["changes"])
+    if "state_coverage" in result:
+        state = result["state_coverage"]
+        print(f"State evidence | {state['clips_with_two_engagement_states']} eligible | "
+              f"{state['abstained_clips']} kept the visual ranking")
     print("Saved", args.output)
 
 
