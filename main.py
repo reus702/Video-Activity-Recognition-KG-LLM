@@ -16,7 +16,6 @@ ROOT = Path(__file__).resolve().parent
 RAW_DIR = ROOT / "data/raw/reassemble"
 OUTPUT_DIR = ROOT / "outputs/visual_baseline"
 CAMERA = "hama1"
-USE_YOLO = False
 WINDOW_SEC = 3.0
 STRIDE_SEC = 1.5
 NUM_FRAMES = 16
@@ -82,8 +81,8 @@ def main():
     ids = [path.stem for path in h5_files]
     if len(ids) != len(set(ids)):
         raise ValueError("Duplicate recording names in input folders")
-    config = pipeline_config(WINDOW_SEC, STRIDE_SEC, NUM_FRAMES, USE_YOLO)
-    extractor = detector = None
+    config = pipeline_config(WINDOW_SEC, STRIDE_SEC, NUM_FRAMES, use_yolo=False)
+    extractor = None
     all_clips = []
     output_dir.mkdir(parents=True, exist_ok=True)
     for h5_path in h5_files:
@@ -108,9 +107,6 @@ def main():
         if extractor is None:
             from src.feature_extraction import VideoFeatureExtractor
             extractor = VideoFeatureExtractor()
-            if USE_YOLO:
-                from src.object_detection import ObjectDetector
-                detector = ObjectDetector()
         (directory / "embeddings").mkdir()
         metadata = []
         for i, clip in enumerate(iter_clips(video_path, WINDOW_SEC, STRIDE_SEC, NUM_FRAMES)):
@@ -122,16 +118,11 @@ def main():
             embedding_path = Path("embeddings") / f"{clip_id}.npy"
             with (directory / embedding_path).open("xb") as stream:
                 np.save(stream, embedding, allow_pickle=False)
-            detections = []
-            if detector is not None:
-                for j in (0, 7, 15):
-                    detections.append({"timestamp": clip["frame_times"][j],
-                                       "objects": detector.detect(clip["frames"][j])})
             metadata.append({
                 **{key: value for key, value in clip.items() if key != "frames"},
                 "clip_id": clip_id, "video_id": video_id,
                 "recording_id": h5_path.stem, "camera": CAMERA,
-                "embedding_path": str(embedding_path), "detections": detections
+                "embedding_path": str(embedding_path), "detections": []
             })
             print(clip_id)
         if len(metadata) != expected_count:
@@ -223,17 +214,10 @@ def observe_gripper_main():
     parser.add_argument("--plan-file", type=Path, required=True)
     parser.add_argument("--clip-id", nargs="+", required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--motion-cues", action="store_true",
-                        help="Measure possible grip cues between adjacent saved samples")
     args = parser.parse_args(sys.argv[2:])
     if args.output.exists():
         parser.error(f"Output already exists: {args.output}")
-    if args.motion_cues:
-        from src.rgb_grip_motion import observe_validation_grip_motion
-
-        report = observe_validation_grip_motion(args.plan_file, args.clip_id)
-    else:
-        report = observe_validation_gripper(args.plan_file, args.clip_id)
+    report = observe_validation_gripper(args.plan_file, args.clip_id)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     write_json(args.output, report)
     print(f"Saved {len(report['observations'])} RGB observations to {args.output}")
@@ -322,21 +306,14 @@ def compare_knowrob_main():
 
     parser = argparse.ArgumentParser(description="Compare the visual and KnowRob validation rankings")
     parser.add_argument("--rankings-file", type=Path, required=True)
-    parser.add_argument("--gripper-observations", type=Path,
-                        help="Audit state evidence availability from paired wrist RGB observations")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(sys.argv[2:])
-    result = compare_knowrob_rankings(args.rankings_file, args.output,
-                                      gripper_observations=args.gripper_observations)
+    result = compare_knowrob_rankings(args.rankings_file, args.output)
     for label, key in (("Visual", "visual_metrics"), ("KnowRob", "knowrob_metrics")):
         metrics = result[key]
         class_f1 = " | ".join(f"{action} F1 {score:.2%}" for action, score in metrics["f1_by_class"].items())
         print(f"{label} | Macro-F1 {metrics['macro_f1']:.2%} | {class_f1}")
     print("Top-1 changes:", result["changes"])
-    if "state_coverage" in result:
-        state = result["state_coverage"]
-        print(f"State evidence | {state['clips_with_two_engagement_states']} eligible | "
-              f"{state['abstained_clips']} kept the visual ranking")
     print("Saved", args.output)
 
 

@@ -7,39 +7,10 @@
 
 <https://example.org/reassemble/manipulation-state> a owl:Ontology .
 
-reassemble:idle a reassemble:Action .
-
-reassemble:Piece a owl:Class ;
-    rdfs:subClassOf dul:DesignedArtifact .
-reassemble:AssemblySite a owl:Class ;
-    rdfs:subClassOf dul:DesignedArtifact .
-reassemble:FreeSupport a owl:Class ;
-    rdfs:subClassOf dul:PhysicalObject .
-
-reassemble:compatibleSite a owl:ObjectProperty ;
-    rdfs:domain reassemble:Piece ;
-    rdfs:range reassemble:AssemblySite .
-
-# The action ontology retains the original socket vocabulary for existing queries.
-reassemble:Connector rdfs:subClassOf reassemble:Piece .
-reassemble:Socket rdfs:subClassOf reassemble:AssemblySite .
-reassemble:compatibleSocket rdfs:subPropertyOf reassemble:compatibleSite .
-
-# A snapshot describes one piece and its relation to the gripper and observed locations.
+# A timestamped view of the gripper in one sampled frame.
 reassemble:ManipulationSnapshot a owl:Class ;
     rdfs:subClassOf dul:Situation .
-reassemble:observedPiece a owl:ObjectProperty ;
-    rdfs:subPropertyOf dul:isSettingFor ;
-    rdfs:domain reassemble:ManipulationSnapshot ;
-    rdfs:range reassemble:Piece .
-reassemble:observedSite a owl:ObjectProperty ;
-    rdfs:subPropertyOf dul:isSettingFor ;
-    rdfs:domain reassemble:ManipulationSnapshot ;
-    rdfs:range reassemble:AssemblySite .
-reassemble:observedSupport a owl:ObjectProperty ;
-    rdfs:subPropertyOf dul:isSettingFor ;
-    rdfs:domain reassemble:ManipulationSnapshot ;
-    rdfs:range reassemble:FreeSupport .
+reassemble:gripper a soma:Gripper .
 reassemble:observedGripper a owl:ObjectProperty ;
     rdfs:subPropertyOf dul:isSettingFor ;
     rdfs:domain reassemble:ManipulationSnapshot ;
@@ -62,15 +33,6 @@ reassemble:frameIndex a owl:DatatypeProperty ;
     rdfs:range xsd:nonNegativeInteger .
 
 # Omit a status when it cannot be observed.
-reassemble:SiteEngagement a owl:Class .
-reassemble:seated a reassemble:SiteEngagement .
-reassemble:separated a reassemble:SiteEngagement .
-reassemble:SupportStatus a owl:Class .
-reassemble:onSupport a reassemble:SupportStatus .
-reassemble:offSupport a reassemble:SupportStatus .
-reassemble:GripStatus a owl:Class .
-reassemble:held a reassemble:GripStatus .
-reassemble:unheld a reassemble:GripStatus .
 reassemble:GripperOpening a owl:Class .
 reassemble:open a reassemble:GripperOpening .
 reassemble:closed a reassemble:GripperOpening .
@@ -78,36 +40,9 @@ reassemble:GripperOccupancy a owl:Class .
 reassemble:empty a reassemble:GripperOccupancy .
 reassemble:occupied a reassemble:GripperOccupancy .
 
-reassemble:siteEngagement a owl:ObjectProperty ;
-    rdfs:domain reassemble:ManipulationSnapshot ;
-    rdfs:range reassemble:SiteEngagement .
-reassemble:supportStatus a owl:ObjectProperty ;
-    rdfs:domain reassemble:ManipulationSnapshot ;
-    rdfs:range reassemble:SupportStatus .
-reassemble:gripStatus a owl:ObjectProperty ;
-    rdfs:domain reassemble:ManipulationSnapshot ;
-    rdfs:range reassemble:GripStatus .
 reassemble:gripperOpening a owl:ObjectProperty ;
     rdfs:domain reassemble:ManipulationSnapshot ;
     rdfs:range reassemble:GripperOpening .
 reassemble:gripperOccupancy a owl:ObjectProperty ;
     rdfs:domain reassemble:ManipulationSnapshot ;
     rdfs:range reassemble:GripperOccupancy .
-
-# Activity cues describe the interval from the named earlier snapshot to this one.
-reassemble:IntervalCue a owl:Class .
-reassemble:noTaskInteraction a reassemble:IntervalCue .
-reassemble:alignedContactTowardSite a reassemble:IntervalCue .
-reassemble:pullWhileGrippingAtSite a reassemble:IntervalCue .
-
-reassemble:intervalStart a owl:ObjectProperty ;
-    rdfs:domain reassemble:ManipulationSnapshot ;
-    rdfs:range reassemble:ManipulationSnapshot .
-reassemble:intervalCue a owl:ObjectProperty ;
-    rdfs:domain reassemble:ManipulationSnapshot ;
-    rdfs:range reassemble:IntervalCue .
-
-reassemble:EvidenceKind a owl:Class .
-reassemble:observedOutcome a reassemble:EvidenceKind .
-reassemble:attemptOnly a reassemble:EvidenceKind .
-reassemble:observedInactivity a reassemble:EvidenceKind .

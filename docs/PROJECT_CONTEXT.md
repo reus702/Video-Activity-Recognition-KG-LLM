@@ -4,27 +4,28 @@
 
 Master's thesis: investigate whether structured robotic knowledge (KnowRob) and LLM reasoning improve few-shot robotic activity recognition from video, compared with a visual-only baseline.
 
-1. Video analysis: OpenCV extracts overlapping RGB windows; YOLO detects objects/components on sampled frames.
-2. Few-shot recognition: frozen pretrained torchvision R(2+1)D-18 extracts a 512-dimensional embedding per clip; a prototype classifier averages labeled support embeddings per class and ranks candidates with cosine similarity.
-3. Knowledge retrieval: entity linking to KnowRob, Prolog queries, and extraction of a relevant subgraph (one KG, not a second graph). Extend the ontology if necessary.
-4. LLM reasoning: proposed Qwen3-8B + KG-RAG consumes visual candidates/scores, detected objects, KG evidence and previous activities. Optional temporal validation and structured JSON output with ambiguity/UNKNOWN.
-5. Evaluation: visual-only vs visual + KnowRob vs visual + KnowRob + LLM; Accuracy, Macro-F1, Top-3 Accuracy. Define a KG-only reranking method before evaluating it. Compare on identical held-out data.
+1. Video analysis: OpenCV extracts overlapping RGB windows and estimates jaw opening from the wrist camera. Estimating occupancy without object detection is planned.
+2. Action recognition: R(2+1)D-18 ranks PICK, PLACE, INSERT and REMOVE. Both the frozen prototype classifier and the supervised fine-tuned checkpoint are retained for comparison.
+3. Knowledge retrieval: KnowRob supplies the existing preferred successor relations. The planned occupancy rules will add evidence about acquisition and release.
+4. LLM reasoning: proposed Qwen3-8B + KG-RAG consumes the visual candidates, timestamped gripper observations, KG evidence and earlier predictions.
+5. Evaluation: compare visual-only, visual + KnowRob and visual + KnowRob + LLM on the same held-out recordings. A separate visual + gripper control can isolate the effect of adding the gripper input.
 
-Source: proposed architecture in `docs/Pipeline.pdf` (copy the original PDF into the repository). REASSEMBLE first; Baxter is a potential second dataset. Additional sensor modalities are a possible future extension, not part of the current RGB baseline.
+`docs/Pipeline.pdf` documents the original proposal. The current scope is
+four-class action recognition on REASSEMBLE without training an object detector.
+Baxter remains a possible second dataset.
 
 ## Current environment and data
 
 - macOS, VS Code, Python 3.12.12 in `.venv`. Use `python -m pip`; standalone pip/pip3 previously pointed to Python 3.10.
-- Dependencies: torch, torchvision, opencv-python, ultralytics, h5py, numpy, pandas, scikit-learn, matplotlib, jupyterlab. NumPy 2 ABI warning previously encountered; NumPy <2 and OpenCV <4.12 were suggested as a workaround. Verify installed versions rather than assuming.
+- Dependencies used by the active pipeline include torch, torchvision, opencv-python, h5py, numpy, matplotlib and JupyterLab. NumPy 2 ABI warning previously encountered; NumPy <2 and OpenCV <4.12 were suggested as a workaround. Verify installed versions rather than assuming.
 - REASSEMBLE HDF5 recordings contain encoded camera video and original frame timestamps. First camera: `hama1`. First recording: `2025-01-09-13-57-17.h5`.
-- Initial parameters: 3 s windows, 1.5 s stride, 16 sampled frames per window. YOLO11n (COCO) initially sampled frames 0, 7, 15. These are provisional choices, not final experimental settings.
+- Initial parameters: 3 s windows, 1.5 s stride, 16 sampled frames per window. These were the initial sampling settings.
 
 ## Implemented and observed in chat
 
 - `src/dataset.py`: `extract_video()` writes encoded `hama1` bytes to MP4 and saves original camera timestamps as `.npy`.
 - `src/video_processing.py`: `iter_clips()` reads overlapping windows with OpenCV and samples frames in chronological order.
 - `src/feature_extraction.py`: `VideoFeatureExtractor` converts BGR to RGB, uses pretrained weights' transforms, replaces the final classifier with `nn.Identity()`, freezes the encoder and returns a `(512,)` NumPy embedding per clip.
-- `src/object_detection.py`: `ObjectDetector` returns labels, confidence and bounding boxes. COCO model produced implausible labels (`sink`, `cup`); domain adaptation is deferred. Detection is independent of video embedding extraction.
 - Original `main.py` ran successfully on the first recording: 67 embeddings (`0000`–`0066`) and `outputs/clips.json`.
 - In `notebooks/dataset_exploration.ipynb`, HDF5 `segments_info` annotations were inspected and clip labeling tested. Example raw labels: `No action.`, `Pick Ethernet.`, `Insert Ethernet.`. Fields include `start`, `end` (Unix timestamps), `text`, `success`, and low-level annotations.
 - Verified labeling result for first recording: IDLE 28, INSERT 24, PICK 7, unlabeled 8 (67 total). No REMOVE or PLACE observed in this recording.
@@ -42,7 +43,7 @@ Implemented in the repository, with tests described below:
 - Annotation validation checks required fields, finite increasing camera timestamps, nonempty labels, valid intervals, success flags and overlapping segments. Video frame count is checked before model loading. Structural checks do not prove temporal synchronization.
 - Clip metadata adds frame bounds, sampled frame indices, relative sampled times, original camera bounds and sampled timestamps, and an explicit flag for the estimated exclusive end at recording termination. Strict full-window labeling is unchanged. `success=False` remains an attempted action of the same class.
 - `src/dataset_report.py` reports window counts, represented segment counts by class, and success counts per recording. Segments with no fully contained window are absent; represented segment counts are not automatically independent shots. Each successful batch writes a new timestamped `dataset_report_*.json` snapshot for the input files discovered in that invocation.
-- YOLO remains disabled and is imported only if enabled. The encoder is loaded only when a new recording needs processing; weights are explicitly pinned to `KINETICS400_V1`.
+- The encoder is loaded only when a new recording needs processing. Weights are pinned to `KINETICS400_V1`.
 - `PrototypeClassifier` exists independently of the batch. It validates inputs, replaces old prototypes on successful refit, rejects invalid/zero vectors, and ranks by cosine similarity. Current choice: mean raw support embeddings, then cosine comparison; scores are not probabilities. Alternative normalization can be compared later on validation.
 
 Validation actually performed:
@@ -66,7 +67,6 @@ The second command is an alternative fresh run directory, not a required second 
 - `dataset_exploration.ipynb` and `video_embeddings.ipynb` now read completed outputs under `outputs/visual_baseline/`, with a selectable recording ID. Neither notebook extracts video, rewrites labels or runs an encoder/detector. No references to legacy JSON, legacy embeddings or `data/videos/` remain in these two notebooks.
 - `src/inspection.py` provides shared metadata/embedding loading and optional detection flattening. Embedding paths are resolved relative to each recording directory. Dataset exploration shows window/segment coverage, validates saved labels against original annotations in memory, and previews a sampled frame with any matching stored boxes. Embedding inspection validates vectors across recordings and shows exploratory neighbors, not evaluation metrics.
 - Existing `detections` schema is retained: per-frame relative video `timestamp`, then `objects` with `label`, `confidence`, pixel `bbox`. Empty or missing lists are supported. Annotation `object` is kept separate from detected labels. The notebooks display the manifest's YOLO flag, so disabled detection is not mistaken for evidence of object absence.
-- To populate detections later, enable `USE_YOLO` in `main.py` and use a fresh `--output-dir`; update notebook `OUTPUT_DIR` accordingly. Existing outputs are not enriched automatically. The baseline remains independent of YOLO and no detection inference was run in this update.
 - All code cells in both updated notebooks executed successfully against the current outputs from repository-root and notebooks working directories (plots checked with a noninteractive backend). Generated output sizes and modification times stayed unchanged. Notebook schemas validated. Six unit tests passed, including optional empty/populated detections and shared loading helpers.
 - The installed pandas cannot import with the current NumPy 1.26.4 (it requests NumPy >=2.0.2). These two notebooks use escaped HTML tables instead, without changing dependencies or the baseline environment.
 
@@ -83,7 +83,6 @@ The second command is an alternative fresh run directory, not a required second 
 - Validate alignment across additional videos; matching frame count alone does not prove alignment. Original time boundaries are now stored, but temporal correctness still requires inspection.
 - Fixed 3 s windows may span action boundaries; strict labeling excludes these and may bias evaluation. A separate continuous-video evaluation can address transitions/IDLE later.
 - The pretrained video encoder was evaluated at 16 frames at 15 fps; our 16 frames over 3 s sample motion more sparsely. Compare temporal sampling on validation later.
-- YOLO COCO vocabulary does not cover many robot components or assembly objects. Inspect detections before using them for KG evidence; decide on domain-specific detection later.
 - KnowRob was previously explored in Docker/ROS/Prolog; actual ontology mappings, retrieval rules and KG-only scoring are not yet implemented/verified.
 
 
@@ -429,216 +428,43 @@ See `docs/FEW_SHOT_BASELINE.md` for both PowerShell commands.
   a sensitivity check on saved validation scores, with no bonus selected
   from the sweep for held-out testing.
 
-## BNC state observability on wrist-camera validation
+## Historical wrist-camera state experiments
 
-- Reviewed eight windows from eight annotated BNC segments with the epoch 3
-  hand model. The sample includes two correct controls, four confusions on
-  successful attempts and two confusions on unsuccessful attempts.
-- In the four successful confusions, the decisive release or visible
-  separation appeared in the context after the model window. Clip 0058, for
-  example, showed the gripped BNC clearly separated from the fixed socket
-  about 0.7 s after the end of the window.
-- Aligned end-effector pose, finger positions, measured force and measured
-  torque with the original hand timestamps. Jaw opening with the piece left
-  behind and withdrawal with the jaws closed supported different readings.
-  Rotation and torque magnitude were present in both directions, including
-  unsuccessful attempts. The small selected sample does not establish a
-  state detector or measure a KnowRob gain.
-- The reproducible review and manual observations are in
-  `notebooks/bnc_state_inspection.ipynb`. The test split was held out. The
-  review used extra frames only to inspect events beyond the model windows.
+- The BNC review found cases where clear release or separation appeared
+  after the evaluated window. In clip 0058 a visible gap appeared about
+  0.7 s after its end. The generic piece–site rules were verified in KnowRob
+  on synthetic inputs, with the same REMOVE evidence for BNC and a round peg.
+- In the 14-clip landmark audit, the piece and target were visible at 36 of
+  42 anchors. The relation was clear at 12 anchors. KnowRob supported PLACE
+  in one clip and abstained in 13. This targeted sample measured evidence
+  availability within the saved model samples.
+- The experimental relative-motion grip cue covered 3 of 20 manually held
+  endpoints on 14 selected validation clips. The separate RGB opening
+  estimator gave 16 of 16 agreements on eight selected BNC clips, with only
+  one open endpoint. In the full validation coverage check it assigned
+  opening at 3,745 of 5,178 endpoints (72.33%).
+- These exploratory scripts, notebooks, object ontologies and fixtures
+  were removed from the active workspace. The saved experiment outputs
+  preserve the reports and the visual baseline. After cleanup, the live
+  KnowRob export still returned both original transitions with the
+  historical ontology fingerprint. The visual and static validation
+  metrics reproduced exactly and all 21 retained regression tests passed.
 
-## BNC socket compatibility in KnowRob — 2026-11-27
+## Planned gripper occupancy pipeline
 
-- The REASSEMBLE ontology declares `reassemble:bnc` as a connector and
-  `reassemble:bncSocket` as a socket, linked by `reassemble:compatibleSocket`
-  from connector to socket.
-- Verified with the KnowRob Python binding in the local `knowrob/ros1:latest`
-  container and the Prolog RDF backend. With `knowledge/reassemble_actions.ttl`
-  loaded, the query `reassemble:compatibleSocket(reassemble:bnc, Socket)`
-  returned `reassemble:bncSocket` from `answer.substitution().get("Socket")`.
-
-## SOMA-aligned BNC scene state — 2026-11-27
-
-- Added `knowledge/reassemble_bnc_state.ttl`, loaded with the application
-  ontology, SOMA and DUL in a single KnowRob knowledge base. A timestamped
-  DUL situation references the connector, socket and gripper. SOMA component
-  relations connect the socket to the workstation and the gripper to the arm.
-- Observations keep engagement, grip status and gripper opening independent.
-  A missing status represents an unknown observation. Snapshots can carry
-  the original recording, segment and clip IDs and camera timestamp.
-- The live Docker smoke check retrieved the five scene entities and verified
-  the change from held to unheld with the BNC still seated on two synthetic
-  snapshots. On macOS, all 21 unit tests passed with `TMPDIR=/private/tmp`.
-  See `docs/KNOWROB_BASELINE.md` for the live check.
-
-## Manual RGB BNC snapshots — 2026-11-27
-
-- Annotated the first and last sampled RGB frames of the eight validation
-  clips in the BNC notebook. The 16 in-window snapshots and five retrospective
-  snapshots are in `knowledge/observations/`. Each stores the source IDs,
-  frame index and exact wrist-camera timestamp.
-- At the sampled window endpoints, engagement is clear at the end of clip
-  0021, where the connector stays seated after release. The other 15 endpoints
-  omit engagement because the view is ambiguous. Four successful confusions
-  have clear later seating or separation. Clip 0170 also has a later view
-  with open jaws and the connector apparently seated.
-- The annotations use RGB only. The later frames and the manual labels are
-  reference data for inspection. Verified source IDs, partition membership,
-  frame indices and timestamps for all 21 snapshots. Live KnowRob queries
-  returned seated at the end of 0021 and separated after the window of 0058.
-
-## Historical BNC action evidence pilot — 2026-11-27
-
-- The former BNC-specific predicate mapped `separated → seated` to
-  INSERT evidence and `seated → separated` to REMOVE evidence. The caller
-  supplies ordered snapshots from the same evaluated window. The rule
-  checks the timestamps, provenance and compatible connector–socket pair.
-- Equal, missing or conflicting engagement values produce no action
-  evidence. An attempted action can leave the observed state unchanged.
-  The rule uses neither activity labels nor success annotations.
-- The live KnowRob smoke check returned both actions on synthetic pairs and
-  abstained for unchanged state, reversed times, different clips and
-  conflicting observations. It abstained on all eight manual in-window
-  pairs because none had two explicit engagement states. The retrospective
-  observations were excluded from the check. All 21 Python unit tests passed
-  with `TMPDIR=/private/tmp`.
-
-## Automatic wrist RGB observations — 2026-11-27
-
-- Added `observe-gripper` to estimate `open` or `closed` from the
-  relative positions of the jaws, with abstention for weak matches and
-  intermediate openings. The fixed-camera template and thresholds were
-  selected on four support recordings. Inference uses the saved first and
-  last sampled frame metadata and wrist RGB. The manual reference is read
-  only during comparison, in `notebooks/bnc_rgb_state_validation.ipynb`.
-- On the eight selected validation clips, all 16 opening estimates agreed
-  with the manual reference (15 closed, one open), including the opening
-  during 0021. All source IDs, frame indices and original timestamps
-  matched the reference. This is a targeted sample, with the test split
-  held out. The automatic output covers jaw opening. Grip status and
-  connector engagement remain undetermined by the estimator, so these
-  observations alone cannot supply evidence to the engagement rule.
-
-## Paired KnowRob validation and state coverage — 2026-11-27
-
-- Compared the epoch 3 visual and static KnowRob rankings on the same
-  2,589 wrist-camera validation windows from 20 recordings. Both gave
-  95.87% Accuracy, 96.16% Macro-F1 and 100% Top-3 Accuracy. The 0.02 static
-  bonus applied to 1,025 windows and changed the candidate order on 651,
-  with zero top-1 changes. On the 292 annotated BNC windows, both gave
-  90.41% Accuracy and 93.01% Macro-F1, with 26 INSERT/REMOVE confusions.
-- Ran the RGB opening estimator on all 5,178 saved endpoints and verified
-  matching clip IDs, frame indices and original timestamps. It assigned
-  opening on 3,745 endpoints (72.33%) and at both ends of 1,612 windows.
-  These counts measure coverage. The engagement rule had zero eligible
-  pairs, so the state arm made no queries and kept every visual ranking.
-- The state audit used only the automatic RGB output. The BNC annotation
-  was used for the evaluation slice. The test split stayed held out.
-  The report is `outputs/experiments/reassemble_hand_finetune/knowrob_state_audit.json`.
-  All 22 Python unit tests passed with `TMPDIR=/private/tmp`. See
-  `docs/KNOWROB_BASELINE.md` for reproducibility.
-
-## Proposed shared action and state model — 2026-11-27
-
-The BNC-specific action predicate was removed. Its scene facts and manual
-observations provide examples for the shared design. The two static
-`preferredSuccessor` relations still serve the static baseline. The live
-KnowRob check still retrieves the scene and the recorded engagement of
-clip 0021. All 22 Python unit tests passed.
-
-In the proposed model, each timestamped observation identifies the same
-physical piece across frames and records whether the gripper is empty,
-holding a piece, or unknown. The piece can be supported on a free surface,
-seated in a specific compatible assembly site, separated from that site,
-or of unknown relation to it. Gripper opening is an independent cue.
-An assembly site can be a socket, hole, axle or threaded mount.
-
-| Action | Proposed observable evidence |
-| --- | --- |
-| IDLE | No sustained manipulation or task-directed approach or retreat. An empty gripper can also occur during an active approach. |
-| PICK | The piece leaves a free support and moves with the gripper after it is grasped. |
-| PLACE | The gripper releases the piece and withdraws while the piece stays on a free support. |
-| INSERT | A held piece approaches a compatible assembly site and becomes seated. The gripper can still be holding it. |
-| REMOVE | A piece seated in an assembly site is grasped and leaves the site while moving with the gripper. Grasp alone is incomplete evidence. |
-
-The transitions describe visible outcomes. Approach, alignment and contact
-can support evidence of an attempt when the outcome is unchanged or
-unobservable. Missing evidence leaves the action unknown. The current
-four-class visual run excluded IDLE, whose REASSEMBLE annotation is
-`No action.`. Check annotated idle windows before adding a fifth class.
-
-1. Review before, during and after examples across the electrical
-   connectors, pegs, gears and threaded piece, including failed attempts
-   and ambiguous windows. Keep post-window evidence for manual review.
-2. Validate the shared observation vocabulary and action evidence on
-   manual examples, then implement rules parameterized by piece and site.
-3. Check RGB observability and abstention on windows from separate validation
-   recordings. Consider a detector for piece and site identity later.
-
-### Manual review across object families
-
-- `notebooks/reassemble_shared_state_review.ipynb` reviews seven wrist-camera
-  clips from three support recordings. It uses original timestamps and
-  identifies model samples, other in-window frames and retrospective context.
-- The small gear shows acquisition from a free surface in 0088 and release
-  in 0092. USB 0048 shows the piece staying at the receptacle after release
-  in context. For removal, the same criterion applies to BNC 0138 and
-  round peg 4 in 0042. The BNC is visibly separate in a later frame,
-  while full separation of the peg remains uncertain in the reviewed frames.
-- The threaded-piece example 0395 has an annotated failed INSERT and an
-  uncertain visible outcome. The IDLE example 0001 shows empty jaws while
-  the camera view moves across the board. All notebook code cells ran on
-  the saved RGB and timestamp files.
-
-### Shared catalog and observation schema
-
-- `knowledge/reassemble_manipulation_state.ttl` defines the common snapshot,
-  with separate relations to the gripper, free support and assembly site.
-  Missing observations remain unknown. `knowledge/reassemble_catalog.ttl`
-  maps all 17 exact object labels to their intended board sites.
-- The BNC pilot maps onto the shared vocabulary through subclass and
-  subproperty declarations. Its original observation IDs and timestamps
-  remain intact. The existing socket compatibility is available through
-  the generic `compatibleSite` query.
-- Verified all 17 label strings against the support metadata. The live
-  KnowRob check returned all 17 expected sites and read a real BNC snapshot
-  and a synthetic peg snapshot through the same properties. It also checked
-  a synthetic gear on a free support and the original BNC queries.
-  All 22 Python unit tests passed.
-
-### Generic action evidence
-
-- `knowledge/manipulation_evidence.pl` compares two observations and returns
-  the supported action, evidence kind and reason. PICK and PLACE use
-  changes in grip and free support. INSERT and REMOVE use grip and
-  engagement with a compatible site. BNC and pegs use the same predicate.
-- Added interval cues to the shared schema. Explicit inactivity can support
-  IDLE, and observed directed contact or pulling can support an INSERT or
-  REMOVE attempt without a confirmed outcome. Conflicting or incomplete
-  observations can yield abstention. Opening alone supplies no action evidence.
-- The live KnowRob check returned all five actions and both attempt types on
-  synthetic examples. It returned identical REMOVE evidence for BNC and
-  round peg 4. The real BNC clip 0021 still lacks an initial engagement
-  observation and returned no action evidence. Reversed times, different
-  clips, incompatible sites and contradictory states also yielded
-  abstention. All 22 Python unit tests passed.
-- Next, measure which of the required observations can be obtained from
-  RGB within the evaluated window before integrating rule evidence into
-  ranking. The visual experiment still has four classes.
-
-### Grip cue from RGB within the model window
-
-- `observe-gripper --motion-cues` adds a separate exploratory report for
-  adjacent saved wrist-camera samples. It uses closed-jaw estimates and
-  compares central texture with surrounding scene motion. It makes no
-  object, action or placement inference.
-- Reviewed 14 validation clips covering PICK, PLACE, INSERT and REMOVE.
-  The cue appeared on 22 of 210 sample pairs and in 7 of 14 clips. It
-  covered 3 of the 20 manually held endpoints and none of the six unheld
-  endpoints. Two additional endpoints had uncertain manual grip. Lack of a
-  cue leaves grip unknown. These counts come from a selected sample.
-- Verified each frame index and original timestamp against the frozen
-  samples in `notebooks/rgb_grip_motion_validation.ipynb`. Support and
-  engagement still need independent visual observations. The prototype
-  remains separate from the action rules and reranking.
+- Keep the two static KnowRob transitions and their 0.02 score bonus.
+  An observed change from `empty` to `occupied` will add soft evidence for
+  PICK and REMOVE. The reverse will support INSERT and PLACE. A missing or
+  unchanged occupancy leaves the candidates without an occupancy bonus.
+- Measure opening separately from occupancy. A closed empty gripper is
+  possible. An anonymous held piece can be estimated from a fixed
+  wrist-camera crop with independent training labels for occupancy.
+- The direction of the occupancy change identifies the candidate pair.
+  Use the existing visual scores and causal temporal context to order
+  the pair. A possible later cue is whether the gripper moves relative to
+  a board mount or a free support. Train and tune on separate recordings
+  and preserve uncertain outcomes.
+- Compare the same visual rankings with static knowledge, occupancy
+  evidence and KG-RAG as separate additions. Keep only observations
+  available by the evaluated window end in the input. Dataset annotations
+  are for training and evaluation.

@@ -130,97 +130,13 @@ whose top-1 label changed. A change is a correction if it matches the
 annotation, a regression if the original label matched the annotation, or
 a change between two incorrect labels. Use a new output path.
 
-## Query the shared scene state and catalog
+## Estimate gripper opening from wrist RGB
 
-Load `DUL.owl`, `SOMA.owl`, `knowledge/reassemble_actions.ttl`,
-`knowledge/reassemble_manipulation_state.ttl` and
-`knowledge/reassemble_catalog.ttl` into the same KnowRob knowledge base.
-For the BNC pilot data, also load `knowledge/reassemble_bnc_state.ttl`.
-
-`compatibleSite(Piece, Site)` relates each of the 17 annotated pieces to
-its intended assembly site on the task board. `datasetObjectLabel` preserves
-the original spelling, including `bolt 4` for the M16 nut. [REASSEMBLE object inventory](https://arxiv.org/html/2502.05086#A3)
-
-```prolog
-reassemble:compatibleSite(reassemble:bnc, Site)
-reassemble:compatibleSite(reassemble:roundPeg4, Site)
-```
-
-A `ManipulationSnapshot` is a DUL situation at one instant. It can reference
-the observed piece, assembly site, free support and gripper. Engagement
-(`seated` or `separated`), support (`onSupport` or `offSupport`), grip of
-the observed piece, gripper occupancy and opening are independent.
-Omit a property when its value is unknown. Retain the original recording,
-segment and clip IDs, frame index and camera timestamp. The BNC pilot
-properties map to the shared properties, and the original pilot queries
-work with both ontologies loaded.
-
-Run the live check from the repository root with the local KnowRob image:
-
-```sh
-docker run --rm --network none \
-  --mount "type=bind,source=$PWD,target=/repo,readonly" \
-  --entrypoint /bin/bash knowrob/ros1:latest -lc \
-  'source /catkin_ws/devel/setup.bash && python3 -B /repo/tests/smoke_bnc_knowrob.py /catkin_ws/src/knowrob/owl/external'
-```
-
-The check queries all 17 intended sites. It retrieves BNC and round peg
-engagement through the same snapshot properties and reads a synthetic
-gear observation on a free surface. It also checks the original BNC
-scene and observation queries.
-
-For manual review of real clips, add
-`knowledge/observations/bnc_validation_window.ttl` as a Turtle data source
-and register the `observation` prefix with URI
-`https://example.org/reassemble/observations/bnc`. For example, this query
-returns `reassemble:seated`:
-
-```prolog
-reassemble:socketEngagement(observation:'2025-01-09-14-57-02_hand_clip_0021_last', Status)
-```
-
-`bnc_validation_post_window.ttl` contains later frames for retrospective
-inspection. Keep both manual observation files out of automated scoring.
-
-### Query action evidence from shared observations
-
-Add `knowledge/manipulation_evidence.pl` as a `prolog` import in the KnowRob
-reasoner, as shown in `tests/smoke_bnc_knowrob.py`. Pass two observations
-from inside the evaluated window in timestamp order. They must refer to
-the same recording, clip and gripper. Manipulation evidence also requires
-the same piece and the same relevant support or compatible assembly site.
-
-```prolog
-manipulation_evidence(reassemble:pegAtSite, reassemble:pegRemoved, Action, Kind, Reason)
-```
-
-This synthetic example returns `remove`, `observedOutcome` and
-`separatedFromCompatibleSiteWhileHeld`. The same predicate supports
-`pick` and `place` from changes in support and grip, and `insert` and
-`remove` from changes in engagement and grip.
-
-For interval-level evidence, set `intervalStart` on the later snapshot to
-the exact earlier snapshot. A `noTaskInteraction` cue can support `idle`.
-An `alignedContactTowardSite` or `pullWhileGrippingAtSite` cue can support
-an INSERT or REMOVE attempt, respectively, when the outcome is unobserved
-or unchanged. `attemptOnly` leaves the outcome undetermined. With
-insufficient or conflicting evidence the predicate returns no supported
-action. Gripper opening alone supplies neither grip nor inactivity.
-
-The live check exercises the five actions, both attempt cues and
-abstention. These are graph queries over supplied observations. The
-RGB estimator and validation rankings currently have no integration
-with the generic action predicate.
-
-### Estimate gripper opening from wrist RGB
-
-`observe-gripper` reads the first and last of the saved sampled frames for
-each selected wrist-camera validation clip. It locates the two jaws by
-template matching and measures their horizontal separation. The template
-comes from frame 6225 of support recording `2025-01-09-14-28-47`. Low
-correlation, inconsistent jaw positions or intermediate gaps produce
-`null` for `gripper_opening`. The output records source IDs, original
-timestamps, frame indices and match diagnostics.
+`observe-gripper` reads the first and last saved model samples in each
+selected wrist-camera validation clip. It measures the distance between
+the jaws by matching an RGB template from the support split. Weak matches
+or intermediate openings return `null`. The output includes recording,
+segment and clip IDs, original timestamps and match diagnostics.
 
 Run from the repository root with the wrist-camera recordings beside the
 RGB plan and a fresh output path.
@@ -228,78 +144,22 @@ RGB plan and a fresh output path.
 ```sh
 .venv/bin/python -B main.py observe-gripper \
   --plan-file outputs/visual_reassemble_hand/plan.json \
-  --output outputs/bnc_state_inspection/rgb_gripper_validation.json \
-  --clip-id \
-  2025-01-09-14-57-02_hand_clip_0021 2025-01-13-15-18-12_hand_clip_0024 \
-  2025-01-09-18-08-36_hand_clip_0146 2025-01-09-19-15-33_hand_clip_0285 \
-  2025-01-13-11-01-25_hand_clip_0157 2025-01-14-12-05-01_hand_clip_0058 \
-  2025-01-09-19-15-33_hand_clip_0262 2025-01-09-14-40-21_hand_clip_0170
+  --output outputs/experiments/reassemble_hand_finetune/gripper_opening_pilot.json \
+  --clip-id 2025-01-09-14-57-02_hand_clip_0021
 ```
 
-Run `notebooks/bnc_rgb_state_validation.ipynb` to compare the saved
-observations with the manual reference. If you chose a different output
-path, set `report_path` in the notebook. The eight reviewed clips yielded
-16 covered endpoints and 16 agreements, including 15 closed and one open.
-These targeted clips cover a narrow range of jaw configurations. Grip
-status and socket engagement need their own visual evidence. In this
-sample, socket engagement was manually identifiable at only one endpoint.
+`knowledge/reassemble_manipulation_state.ttl` defines separate properties for
+gripper opening and occupancy on timestamped snapshots. The active command
+estimates opening. Occupancy observations and their reranking rules are
+planned.
 
-### Check a grip cue from relative RGB motion
+## Planned occupancy evidence
 
-Use the same `observe-gripper` command with `--motion-cues` and a fresh
-output path, such as
-`outputs/bnc_state_inspection/rgb_grip_motion_validation.json`. Keep the
-eight BNC clip IDs above and append these six validation clips:
+With two reliable observations in the same window, `empty → occupied`
+supports both PICK and REMOVE. The reverse supports both INSERT and PLACE.
+An unknown or unchanged occupancy gives no bonus. Keep the static successor
+bonus of 0.02 as a separate contribution from the proposed occupancy bonus.
 
-```text
-2025-01-09-14-57-02_hand_clip_0058  2025-01-09-18-44-37_hand_clip_0060
-2025-01-09-18-08-36_hand_clip_0181  2025-01-09-14-40-21_hand_clip_0118
-2025-01-09-18-08-36_hand_clip_0071  2025-01-09-14-40-21_hand_clip_0199
-```
-
-The option compares adjacent saved samples. When the jaws are estimated
-closed in both frames, OpenCV tracks texture in the gap and in the
-surrounding scene. A stable center against a coherently moving scene
-produces `possible_held_piece`. With weak tracks or insufficient motion
-the cue is unknown. Run `notebooks/rgb_grip_motion_validation.ipynb`
-to verify provenance and check coverage against the manual endpoints.
-The cue lacks piece identity, support and seating information. Treat it
-as exploratory RGB evidence, separate from KnowRob scoring.
-
-### Compare static KnowRob and audit state coverage
-
-Use the saved wrist-camera epoch 3 validation predictions and the matching
-static KnowRob trace. Generate opening observations for every saved validation
-clip with the command below. Only clip IDs are passed to the estimator.
-
-```sh
-.venv/bin/python -B - <<'PY'
-import json
-from pathlib import Path
-import subprocess
-import sys
-
-run = Path("outputs/experiments/reassemble_hand_finetune")
-predictions = json.loads((run / "validation_predictions.json").read_text())
-subprocess.run([
-    sys.executable, "-B", "main.py", "observe-gripper",
-    "--plan-file", "outputs/visual_reassemble_hand/plan.json",
-    "--output", str(run / "rgb_gripper_validation_full.json"),
-    "--clip-id", *(row["clip_id"] for row in predictions),
-], check=True)
-PY
-
-.venv/bin/python -B main.py compare-knowrob \
-  --rankings-file outputs/experiments/reassemble_hand_finetune/knowrob_rankings.json \
-  --gripper-observations outputs/experiments/reassemble_hand_finetune/rgb_gripper_validation_full.json \
-  --output outputs/experiments/reassemble_hand_finetune/knowrob_state_audit.json
-```
-
-Use fresh output paths for a repeat run. The comparison matches every
-observation to the exact saved validation frame and timestamp. It reports
-static bonus coverage, opening coverage and the visual fallback. The
-opening estimator supplies no socket engagement states. The historical
-state audit measured coverage with those inputs. The proposed shared action
-model is described in `docs/PROJECT_CONTEXT.md`.
-The report also includes a BNC-only evaluation slice selected by object
-annotation after scoring.
+For the first comparison, leave the choice within each pair to the visual
+ranking and the existing temporal evidence. Use the labels only for
+training and evaluation. Inference uses RGB and earlier predictions.

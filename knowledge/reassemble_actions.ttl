@@ -16,13 +16,3 @@ reassemble:insert a reassemble:Action .
 reassemble:remove a reassemble:Action ;
     reassemble:preferredSuccessor reassemble:place .
 reassemble:place a reassemble:Action .
-
-reassemble:Connector a owl:Class .
-reassemble:Socket a owl:Class .
-reassemble:compatibleSocket a owl:ObjectProperty ;
-    rdfs:domain reassemble:Connector ;
-    rdfs:range reassemble:Socket .
-
-reassemble:bnc a reassemble:Connector ;
-    reassemble:compatibleSocket reassemble:bncSocket .
-reassemble:bncSocket a reassemble:Socket .
